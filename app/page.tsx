@@ -209,7 +209,7 @@ export default function Dashboard() {
 
     if (savedEvents) {
       try {
-        setEvents(JSON.parse(savedEvents));
+        const parsed = JSON.parse(savedEvents);
         setEvents(Array.isArray(parsed) ? parsed : initialMockEvents);
       } catch (e) {
         setEvents(initialMockEvents);
@@ -713,8 +713,21 @@ export default function Dashboard() {
     let noticeMessages: string[] = [];
 
     // 網址智慧辨識建卡系統
-    if (text.startsWith("http://") || text.startsWith("https://")) {
-      const match = identifyTicketPlatform(cleanInput);
+    // 允許使用者貼上沒有 http(s):// 開頭的網址（例如從分享功能複製出來的網址常常會被拿掉協議）
+    const looksLikeUrl =
+      text.startsWith("http://") ||
+      text.startsWith("https://") ||
+      /^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(
+        cleanInput.split(/\s+/)[0]
+      );
+
+    if (looksLikeUrl) {
+      // 若使用者沒帶協議，統一補上 https:// 以確保後續連結可正常開啟、平台比對邏輯一致
+      const normalizedUrl = /^https?:\/\//i.test(cleanInput)
+        ? cleanInput
+        : `https://${cleanInput}`;
+
+      const match = identifyTicketPlatform(normalizedUrl);
       const agencyGuess = match ? match.platform : "外部網站連結專案";
       const isKnownPlatform = !!match;
 
@@ -744,7 +757,7 @@ export default function Dashboard() {
             : "未指定地點 (請展開本卡片手動微調)",
         showDate: "2026-12-31 19:00",
         agency: agencyGuess,
-        sourceUrl: cleanInput,
+        sourceUrl: normalizedUrl,
         statusLifecycle: "watchlist",
         userNotes: fallbackNotes,
         expenses: [{ item: "預估票規費項目", cost: 0 }],
@@ -1096,17 +1109,29 @@ export default function Dashboard() {
       0
     );
 
-  const filteredEvents = events.filter((event) => {
-    const matchesCategory =
-      categoryFilter === "all" || event.type === categoryFilter;
-    const matchesStatus =
-      statusFilter === "all" || event.statusLifecycle === statusFilter;
-    const matchesSearch =
-      event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      event.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      event.location.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesStatus && matchesSearch;
-  });
+  const filteredEvents = events
+    .filter((event) => {
+      const matchesCategory =
+        categoryFilter === "all" || event.type === categoryFilter;
+      const matchesStatus =
+        statusFilter === "all" || event.statusLifecycle === statusFilter;
+      const matchesSearch =
+        event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        event.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        event.location.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesStatus && matchesSearch;
+    })
+    // 依演出日期由近到遠排序，避免新增/匯入後卡片順序與實際時間線脫節
+    .sort((a, b) => {
+      const offsetA =
+        eventOffsets[a.id] !== undefined ? eventOffsets[a.id] : browserOffset;
+      const offsetB =
+        eventOffsets[b.id] !== undefined ? eventOffsets[b.id] : browserOffset;
+      return (
+        getUtcTimestamp(a.showDate, offsetA) -
+        getUtcTimestamp(b.showDate, offsetB)
+      );
+    });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 pb-16 selection:bg-purple-500 selection:text-white">
