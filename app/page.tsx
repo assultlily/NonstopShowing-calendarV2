@@ -1,10 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import {
-  mockEvents as initialMockEvents,
-  ShowEvent,
-} from "./mockEvents";
+import { mockEvents as initialMockEvents, ShowEvent } from "./mockEvents";
 import {
   Calendar,
   List,
@@ -35,6 +32,8 @@ import {
   Square,
   Plus,
   Trash2,
+  Clock,
+  FileSpreadsheet,
 } from "lucide-react";
 
 // 語系字典設定
@@ -64,10 +63,13 @@ const TRANSLATIONS = {
     minutes: "分鐘",
     hours: "小時",
     alarmTriggered: "⏰ 鬧鐘提醒！活動即將開始：",
+    countdownPrefix: "⏳ 售票倒計時 ",
+    countdownEnded: "🎬 售票已開放 / 已截止",
   },
   en: {
     title: "Nonstop Challenger Inter-system Dispatch Center",
-    subtitle: "Intuitive dispatching, flexible and smooth. One-click export, complete control - Budget Safe Lock",
+    subtitle:
+      "Intuitive dispatching, flexible and smooth. One-click export, complete control - Budget Safe Lock",
     budget: "CONFIRMED BUDGET",
     escrow: "LOCKED ESCROW FUNDS",
     volume: "MAX FLOW VOLUME",
@@ -83,14 +85,17 @@ const TRANSLATIONS = {
     addBtn: "Add",
     memoPlaceholder: "Click to add notes...",
     noChecklist: "No reminders. Add one manually!",
-    conflictAlert: "Conflict Alert: This event conflicts with other schedules within 3 hours!",
+    conflictAlert:
+      "Conflict Alert: This event conflicts with other schedules within 3 hours!",
     alarmSet: "Alarm Set",
     alarmOff: "Alarm Disabled",
     alarmAhead: "ahead",
     minutes: "mins",
     hours: "hrs",
     alarmTriggered: "⏰ Alarm Alert! Event starting soon: ",
-  }
+    countdownPrefix: "⏳ Sale starts in ",
+    countdownEnded: "🎬 Ticket Sales Started / Ended",
+  },
 };
 
 type LangType = "zh" | "en";
@@ -107,6 +112,97 @@ interface AlarmConfig {
   minutesAhead: number; // 提前幾分鐘
 }
 
+// ----------------------------------------------------
+// 頂層全域輔助工具宣告，徹底根絕區域 ReferenceError
+// ----------------------------------------------------
+const formatGmtLabel = (offset: number) => {
+  if (offset === 0) return "GMT+0";
+  return offset > 0 ? `GMT+${offset}` : `GMT${offset}`;
+};
+
+const getUtcTimestamp = (timeStr: string, offset: number) => {
+  try {
+    const parts = timeStr.split(" ");
+    const datePart = parts[0];
+    const timePart = parts[1] || "12:00";
+    const [year, month, day] = datePart.split("-").map(Number);
+    const [hours, minutes] = timePart.split(":").map(Number);
+
+    const date = new Date(year, month - 1, day, hours, minutes);
+    return date.getTime() - offset * 60 * 60 * 1000;
+  } catch (e) {
+    return 0;
+  }
+};
+
+// 搶票動態倒計時輕量化子元件
+function TicketCountdown({
+  saleTimeStr,
+  venueOffset,
+  t,
+}: {
+  saleTimeStr: string;
+  venueOffset: number;
+  t: any;
+}) {
+  const [timeLeft, setTimeLeft] = useState<{
+    days: number;
+    hours: number;
+    minutes: number;
+    seconds: number;
+  } | null>(null);
+  const [isEnded, setIsEnded] = useState(false);
+
+  useEffect(() => {
+    const calculate = () => {
+      const targetUtc = getUtcTimestamp(saleTimeStr, venueOffset);
+      const nowUtc = Date.now();
+      const diff = targetUtc - nowUtc;
+
+      if (diff <= 0) {
+        setIsEnded(true);
+        return;
+      }
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / (1000 * 60)) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
+      setTimeLeft({ days, hours, minutes, seconds });
+      setIsEnded(false);
+    };
+
+    calculate();
+    const interval = setInterval(calculate, 1000);
+    return () => clearInterval(interval);
+  }, [saleTimeStr, venueOffset]);
+
+  if (isEnded)
+    return (
+      <span className="text-slate-500 text-[10px]">{t.countdownEnded}</span>
+    );
+  if (!timeLeft) return null;
+
+  const totalHours = timeLeft.days * 24 + timeLeft.hours;
+  const isUrgent = totalHours < 1;
+  const isWarning = totalHours < 24 && totalHours >= 1;
+
+  let styleClass = "text-indigo-400 font-mono text-[11px]";
+  if (isUrgent)
+    styleClass = "text-rose-500 font-bold font-mono text-[11px] animate-pulse";
+  else if (isWarning)
+    styleClass = "text-amber-500 font-medium font-mono text-[11px]";
+
+  return (
+    <span className={styleClass}>
+      {t.countdownPrefix}
+      {timeLeft.days > 0 ? `${timeLeft.days}d ` : ""}
+      {timeLeft.hours.toString().padStart(2, "0")}h:
+      {timeLeft.minutes.toString().padStart(2, "0")}m:
+      {timeLeft.seconds.toString().padStart(2, "0")}s
+    </span>
+  );
+}
+
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState<"show" | "ticket">("show");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -119,7 +215,9 @@ export default function Dashboard() {
   const t = TRANSLATIONS[lang];
 
   // 2. 核心貨幣狀態 & 自訂匯率小工具
-  const [currency, setCurrency] = useState<"TWD" | "USD" | "JPY" | "EUR">("TWD");
+  const [currency, setCurrency] = useState<"TWD" | "USD" | "JPY" | "EUR">(
+    "TWD"
+  );
   const [rates, setRates] = useState({
     TWD: 1,
     USD: 0.031,
@@ -175,12 +273,24 @@ export default function Dashboard() {
   const [releasedAmount, setReleasedAmount] = useState<number | null>(null);
 
   // 復原系統快照
-  const [previousEvents, setPreviousEvents] = useState<ShowEvent[] | null>(null);
-  const [previousSplits, setPreviousSplits] = useState<Record<string, { total: number; split: number }> | null>(null);
-  const [previousRoles, setPreviousRoles] = useState<Record<string, "primary" | "backup"> | null>(null);
-  const [previousOffsets, setPreviousOffsets] = useState<Record<string, number> | null>(null);
+  const [previousEvents, setPreviousEvents] = useState<ShowEvent[] | null>(
+    null
+  );
+  const [previousSplits, setPreviousSplits] = useState<Record<
+    string,
+    { total: number; split: number }
+  > | null>(null);
+  const [previousRoles, setPreviousRoles] = useState<Record<
+    string,
+    "primary" | "backup"
+  > | null>(null);
+  const [previousOffsets, setPreviousOffsets] = useState<Record<
+    string,
+    number
+  > | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   // 初始化載入資料與時區偵測
   useEffect(() => {
@@ -196,36 +306,78 @@ export default function Dashboard() {
     const savedRates = localStorage.getItem("nonstop_challenger_rates");
 
     if (savedEvents) {
-      try { setEvents(JSON.parse(savedEvents)); } catch (e) { setEvents(initialMockEvents); }
-    } else { setEvents(initialMockEvents); }
+      try {
+        setEvents(JSON.parse(savedEvents));
+      } catch (e) {
+        setEvents(initialMockEvents);
+      }
+    } else {
+      setEvents(initialMockEvents);
+    }
 
     if (savedSplits) {
-      try { setTicketSplits(JSON.parse(savedSplits)); } catch (e) { setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } }); }
-    } else { setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } }); }
+      try {
+        setTicketSplits(JSON.parse(savedSplits));
+      } catch (e) {
+        setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } });
+      }
+    } else {
+      setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } });
+    }
 
     if (savedRoles) {
-      try { setEventRoles(JSON.parse(savedRoles)); } catch (e) { setEventRoles({}); }
+      try {
+        setEventRoles(JSON.parse(savedRoles));
+      } catch (e) {
+        setEventRoles({});
+      }
     }
 
     if (savedOffsets) {
-      try { setEventOffsets(JSON.parse(savedOffsets)); } catch (e) { setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 }); }
-    } else { setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 }); }
+      try {
+        setEventOffsets(JSON.parse(savedOffsets));
+      } catch (e) {
+        setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
+      }
+    } else {
+      setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
+    }
 
     if (savedChecklist) {
-      try { setChecklist(JSON.parse(savedChecklist)); } catch (e) { setChecklist([]); }
+      try {
+        setChecklist(JSON.parse(savedChecklist));
+      } catch (e) {
+        setChecklist([]);
+      }
     } else {
       setChecklist([
-        { id: "1", text: "確認護照效期大於 6 個月", completed: false, notes: "抽屜第二格" },
-        { id: "2", text: "開通海外信用卡刷卡與海外提款", completed: false, notes: "主刷中信/備用富邦" },
+        {
+          id: "1",
+          text: "確認護照效期大於 6 個月",
+          completed: false,
+          notes: "抽屜第二格",
+        },
+        {
+          id: "2",
+          text: "開通海外信用卡刷卡與海外提款",
+          completed: false,
+          notes: "主刷中信/備用富邦",
+        },
       ]);
     }
 
     if (savedAlarms) {
-      try { setAlarms(JSON.parse(savedAlarms)); } catch (e) { setAlarms({}); }
+      try {
+        setAlarms(JSON.parse(savedAlarms));
+      } catch (e) {
+        setAlarms({});
+      }
     }
 
     if (savedRates) {
-      try { setRates(JSON.parse(savedRates)); } catch (e) {}
+      try {
+        setRates(JSON.parse(savedRates));
+      } catch (e) {}
     }
   }, []);
 
@@ -236,7 +388,10 @@ export default function Dashboard() {
       events.forEach((event) => {
         const config = alarms[event.id];
         if (config && config.enabled) {
-          const venueOffset = eventOffsets[event.id] !== undefined ? eventOffsets[event.id] : browserOffset;
+          const venueOffset =
+            eventOffsets[event.id] !== undefined
+              ? eventOffsets[event.id]
+              : browserOffset;
           const eventTime = getUtcTimestamp(event.showDate, venueOffset);
           const alarmTime = eventTime - config.minutesAhead * 60 * 1000;
 
@@ -247,7 +402,9 @@ export default function Dashboard() {
                 body: `${event.artist} @ ${event.location}\n開始時間：${event.showDate}`,
               });
             } else {
-              alert(`${t.alarmTriggered}\n【${event.title}】\n即將在 ${config.minutesAhead} 分鐘後開始！`);
+              alert(
+                `${t.alarmTriggered}\n【${event.title}】\n即將在 ${config.minutesAhead} 分鐘後開始！`
+              );
             }
             // 觸發後關閉避免重複彈出
             toggleAlarm(event.id, false);
@@ -276,17 +433,26 @@ export default function Dashboard() {
       setPreviousOffsets({ ...eventOffsets });
     }
     setEvents(newEvents);
-    localStorage.setItem("nonstop_challenger_events", JSON.stringify(newEvents));
+    localStorage.setItem(
+      "nonstop_challenger_events",
+      JSON.stringify(newEvents)
+    );
   };
 
   const saveChecklistToStorage = (newList: ChecklistItem[]) => {
     setChecklist(newList);
-    localStorage.setItem("nonstop_challenger_checklist", JSON.stringify(newList));
+    localStorage.setItem(
+      "nonstop_challenger_checklist",
+      JSON.stringify(newList)
+    );
   };
 
   const saveAlarmsToStorage = (newAlarms: Record<string, AlarmConfig>) => {
     setAlarms(newAlarms);
-    localStorage.setItem("nonstop_challenger_alarms", JSON.stringify(newAlarms));
+    localStorage.setItem(
+      "nonstop_challenger_alarms",
+      JSON.stringify(newAlarms)
+    );
   };
 
   // 旅遊 Checklist 操作
@@ -325,7 +491,8 @@ export default function Dashboard() {
   // 鬧鐘操作
   const toggleAlarm = (eventId: string, forceEnabled?: boolean) => {
     const current = alarms[eventId] || { enabled: false, minutesAhead: 30 };
-    const nextEnabled = forceEnabled !== undefined ? forceEnabled : !current.enabled;
+    const nextEnabled =
+      forceEnabled !== undefined ? forceEnabled : !current.enabled;
     const updated = {
       ...alarms,
       [eventId]: { ...current, enabled: nextEnabled },
@@ -342,30 +509,21 @@ export default function Dashboard() {
     saveAlarmsToStorage(updated);
   };
 
-  // 鍵盤快速鍵 Ctrl+Z 監聽
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-        if (previousEvents) {
-          e.preventDefault();
-          triggerUndo();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previousEvents, previousSplits, previousRoles, previousOffsets]);
-
   const saveSplitsToStorage = (
     newSplits: Record<string, { total: number; split: number }>,
     takeSnapshot = true
   ) => {
     if (takeSnapshot) setPreviousSplits({ ...ticketSplits });
     setTicketSplits(newSplits);
-    localStorage.setItem("nonstop_challenger_splits", JSON.stringify(newSplits));
+    localStorage.setItem(
+      "nonstop_challenger_splits",
+      JSON.stringify(newSplits)
+    );
   };
 
-  const saveRolesToStorage = (newRoles: Record<string, "primary" | "backup">) => {
+  const saveRolesToStorage = (
+    newRoles: Record<string, "primary" | "backup">
+  ) => {
     setPreviousRoles({ ...eventRoles });
     setEventRoles(newRoles);
     localStorage.setItem("nonstop_challenger_roles", JSON.stringify(newRoles));
@@ -374,7 +532,10 @@ export default function Dashboard() {
   const saveOffsetsToStorage = (newOffsets: Record<string, number>) => {
     setPreviousOffsets({ ...eventOffsets });
     setEventOffsets(newOffsets);
-    localStorage.setItem("nonstop_challenger_offsets", JSON.stringify(newOffsets));
+    localStorage.setItem(
+      "nonstop_challenger_offsets",
+      JSON.stringify(newOffsets)
+    );
   };
 
   const triggerUndo = () => {
@@ -385,19 +546,31 @@ export default function Dashboard() {
     const currentOffsets = { ...eventOffsets };
 
     setEvents(previousEvents);
-    localStorage.setItem("nonstop_challenger_events", JSON.stringify(previousEvents));
+    localStorage.setItem(
+      "nonstop_challenger_events",
+      JSON.stringify(previousEvents)
+    );
 
     if (previousSplits) {
       setTicketSplits(previousSplits);
-      localStorage.setItem("nonstop_challenger_splits", JSON.stringify(previousSplits));
+      localStorage.setItem(
+        "nonstop_challenger_splits",
+        JSON.stringify(previousSplits)
+      );
     }
     if (previousRoles) {
       setEventRoles(previousRoles);
-      localStorage.setItem("nonstop_challenger_roles", JSON.stringify(previousRoles));
+      localStorage.setItem(
+        "nonstop_challenger_roles",
+        JSON.stringify(previousRoles)
+      );
     }
     if (previousOffsets) {
       setEventOffsets(previousOffsets);
-      localStorage.setItem("nonstop_challenger_offsets", JSON.stringify(previousOffsets));
+      localStorage.setItem(
+        "nonstop_challenger_offsets",
+        JSON.stringify(previousOffsets)
+      );
     }
 
     setPreviousEvents(currentEvents);
@@ -408,53 +581,18 @@ export default function Dashboard() {
     setAiNotice("↩️ 已成功復原至上一步！");
   };
 
-  // 全球時區換算
-  const convertToUserLocalTime = (venueTimeStr: string, venueOffset: number) => {
-    try {
-      const parts = venueTimeStr.split(" ");
-      const datePart = parts[0];
-      const timePart = parts[1] || "12:00";
-
-      const [year, month, day] = datePart.split("-").map(Number);
-      const [hours, minutes] = timePart.split(":").map(Number);
-
-      const date = new Date(year, month - 1, day, hours, minutes);
-      const diffHours = browserOffset - venueOffset;
-      date.setHours(date.getHours() + diffHours);
-
-      const pad = (n: number) => n.toString().padStart(2, "0");
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-        date.getDate()
-      )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-    } catch (e) {
-      return "時區計算錯誤";
-    }
-  };
-
-  // 取得 UTC 毫秒戳記
-  const getUtcTimestamp = (timeStr: string, offset: number) => {
-    try {
-      const parts = timeStr.split(" ");
-      const datePart = parts[0];
-      const timePart = parts[1] || "12:00";
-      const [year, month, day] = datePart.split("-").map(Number);
-      const [hours, minutes] = timePart.split(":").map(Number);
-
-      const date = new Date(year, month - 1, day, hours, minutes);
-      return date.getTime() - offset * 60 * 60 * 1000;
-    } catch (e) {
-      return 0;
-    }
-  };
-
   // 【精準防撞時間衝突偵測：重疊 3 小時內】
   const getConflictingEvents = (currentEvent: ShowEvent) => {
-    const currentOffset = eventOffsets[currentEvent.id] !== undefined ? eventOffsets[currentEvent.id] : browserOffset;
+    const currentOffset =
+      eventOffsets[currentEvent.id] !== undefined
+        ? eventOffsets[currentEvent.id]
+        : browserOffset;
     const currentUtc = getUtcTimestamp(currentEvent.showDate, currentOffset);
 
     return events.filter((e) => {
       if (e.id === currentEvent.id) return false;
-      const eOffset = eventOffsets[e.id] !== undefined ? eventOffsets[e.id] : browserOffset;
+      const eOffset =
+        eventOffsets[e.id] !== undefined ? eventOffsets[e.id] : browserOffset;
       const eUtc = getUtcTimestamp(e.showDate, eOffset);
 
       const diffMs = Math.abs(currentUtc - eUtc);
@@ -466,12 +604,15 @@ export default function Dashboard() {
   };
 
   const getNavigationUrl = (locationName: string) => {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationName)}`;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      locationName
+    )}`;
   };
 
   const getEmbedMapIframeUrl = (locationName: string) => {
     let q = "台北小巨蛋";
-    if (locationName.includes("世運") || locationName.includes("高雄")) q = "高雄國家體育場";
+    if (locationName.includes("世運") || locationName.includes("高雄"))
+      q = "高雄國家體育場";
     if (locationName.includes("理律")) q = "台北市信義區忠孝東路四段555號";
     if (locationName.includes("華山")) q = "華山1914文化創意產業園區";
 
@@ -479,9 +620,117 @@ export default function Dashboard() {
     return `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
   };
 
-  const formatGmtLabel = (offset: number) => {
-    if (offset === 0) return "GMT+0";
-    return offset > 0 ? `GMT+${offset}` : `GMT${offset}`;
+  // ----------------------------------------------------
+  // 【外掛功能：參戰清單一鍵 Excel/CSV 匯出與疊加匯入】
+  // ----------------------------------------------------
+  const exportChecklistToCsv = () => {
+    const targetEvents = events.filter(
+      (e) =>
+        e.statusLifecycle === "purchased" ||
+        e.statusLifecycle === "applied_drawing" ||
+        e.statusLifecycle === "waiting_list"
+    );
+
+    const headers = [
+      "專案標題",
+      "主要藝人",
+      "演出地點",
+      "演出日期",
+      "售票平台/主辦",
+      "目前生命週期狀態",
+      "原始情報連結",
+    ];
+    const rows = targetEvents.map((e) => [
+      e.title,
+      e.artist,
+      e.location,
+      e.showDate,
+      e.agency,
+      e.statusLifecycle,
+      e.sourceUrl,
+    ]);
+
+    // 內建 Excel 專用 BOM 頭 確保中文不亂碼
+    const csvContent =
+      "\uFEFF" +
+      [
+        headers.join(","),
+        ...rows.map((r) =>
+          r.map((val) => `"${String(val).replace(/"/g, '""')}"`).join(",")
+        ),
+      ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Challenger_參戰活動清單_${
+      new Date().toISOString().split("T")[0]
+    }.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportCsvChecklist = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const lines = text
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (lines.length <= 1) return;
+
+        const importedNewEvents: ShowEvent[] = [];
+        for (let i = 1; i < lines.length; i++) {
+          const matches =
+            lines[i].match(/(".*?"|[^,\s]+)(?=\s*,|\s*$)/g) ||
+            lines[i].split(",");
+          const cleanFields = matches.map((field) =>
+            field.replace(/^"|"$/g, "").replace(/""/g, '"')
+          );
+
+          if (cleanFields[0]) {
+            importedNewEvents.push({
+              id: `csv-event-${Date.now()}-${i}`,
+              title: cleanFields[0] || "未命名 CSV 活動",
+              artist: cleanFields[1] || "未指定藝人",
+              location: cleanFields[2] || "未指定地點",
+              showDate: cleanFields[3] || "2026-12-31 18:00",
+              agency: cleanFields[4] || "CSV 導入平台",
+              statusLifecycle: (cleanFields[5] as any) || "purchased",
+              sourceUrl: cleanFields[6] || "https://ticketplus.com.tw",
+              userNotes: "【📬 本活動是經由參戰活動清單 CSV 匯入疊加】",
+              type: "official",
+              expenses: [{ item: "預估票費", cost: 0 }],
+              ticketStages: [
+                {
+                  stageName: "售票管制點已同步",
+                  saleTime: cleanFields[3] || "2026-12-31 12:00",
+                  status: "active",
+                },
+              ],
+              fanEvents: [],
+              curatedShops: [],
+            });
+          }
+        }
+
+        if (importedNewEvents.length > 0) {
+          saveEventsToStorage([...importedNewEvents, ...events]);
+          alert(`🎉 成功疊加匯入 ${importedNewEvents.length} 筆參戰活動行程！`);
+        }
+      } catch (err) {
+        alert("❌ 讀取 Excel/CSV 失敗，請確保欄位結構正確。");
+      }
+    };
+    reader.readAsText(file);
   };
 
   const exportData = () => {
@@ -502,7 +751,9 @@ export default function Dashboard() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `NonstopChallenger_Backup_${new Date().toISOString().split("T")[0]}.json`;
+    link.download = `NonstopChallenger_Backup_${
+      new Date().toISOString().split("T")[0]
+    }.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -541,23 +792,47 @@ export default function Dashboard() {
     const lowercaseUrl = url.toLowerCase();
 
     // 1. 台灣主流平台
-    if (lowercaseUrl.includes("tixcraft.com")) return { platform: "tixCraft 拓元售票", color: "text-rose-400" };
-    if (lowercaseUrl.includes("kktix.cc") || lowercaseUrl.includes("kktix.com")) return { platform: "KKTIX 售票", color: "text-teal-400" };
-    if (lowercaseUrl.includes("kham.com.tw")) return { platform: "KHAM 寬宏售票", color: "text-amber-400" };
-    if (lowercaseUrl.includes("udnfunlife.com") || lowercaseUrl.includes("udnticket")) return { platform: "udn 售票網", color: "text-blue-400" };
-    if (lowercaseUrl.includes("famiticket.com.tw") || lowercaseUrl.includes("famiport")) return { platform: "FamiTicket 全網購票", color: "text-green-400" };
-    if (lowercaseUrl.includes("opentix.life")) return { platform: "OPENTIX 兩廳院文化生活", color: "text-cyan-400" };
-    if (lowercaseUrl.includes("ticketplus.com.tw")) return { platform: "遠大售票", color: "text-emerald-400" };
-    if (lowercaseUrl.includes("ticket.com.tw")) return { platform: "年代售票", color: "text-orange-400" };
-    if (lowercaseUrl.includes("mna.com.tw") || lowercaseUrl.includes("mnaticket.com.tw")) return { platform: "MNA 牛耳藝術", color: "text-yellow-600" };
-    if (lowercaseUrl.includes("ibon.com.tw")) return { platform: "ibon 售票系統", color: "text-red-500" };
+    if (lowercaseUrl.includes("tixcraft.com"))
+      return { platform: "tixCraft 拓元售票", color: "text-rose-400" };
+    if (lowercaseUrl.includes("kktix.cc") || lowercaseUrl.includes("kktix.com"))
+      return { platform: "KKTIX 售票", color: "text-teal-400" };
+    if (lowercaseUrl.includes("kham.com.tw"))
+      return { platform: "KHAM 寬宏售票", color: "text-amber-400" };
+    if (
+      lowercaseUrl.includes("udnfunlife.com") ||
+      lowercaseUrl.includes("udnticket")
+    )
+      return { platform: "udn 售票網", color: "text-blue-400" };
+    if (
+      lowercaseUrl.includes("famiticket.com.tw") ||
+      lowercaseUrl.includes("famiport")
+    )
+      return { platform: "FamiTicket 全網購票", color: "text-green-400" };
+    if (lowercaseUrl.includes("opentix.life"))
+      return { platform: "OPENTIX 兩廳院文化生活", color: "text-cyan-400" };
+    if (lowercaseUrl.includes("ticketplus.com.tw"))
+      return { platform: "遠大售票", color: "text-emerald-400" };
+    if (lowercaseUrl.includes("ticket.com.tw"))
+      return { platform: "年代售票", color: "text-orange-400" };
+    if (
+      lowercaseUrl.includes("mna.com.tw") ||
+      lowercaseUrl.includes("mnaticket.com.tw")
+    )
+      return { platform: "MNA 牛耳藝術", color: "text-yellow-600" };
+    if (lowercaseUrl.includes("ibon.com.tw"))
+      return { platform: "ibon 售票系統", color: "text-red-500" };
 
     // 2. 海外主流平台
-    if (lowercaseUrl.includes("livenation")) return { platform: "Live Nation 理想國", color: "text-yellow-400" };
-    if (lowercaseUrl.includes("ticketmaster")) return { platform: "Ticketmaster", color: "text-sky-400" };
-    if (lowercaseUrl.includes("confetti-web.com")) return { platform: "Confetti 票務", color: "text-purple-400" };
-    if (lowercaseUrl.includes("pia.jp")) return { platform: "Ticket Pia (ぴあ)", color: "text-indigo-400" };
-    if (lowercaseUrl.includes("eplus.jp")) return { platform: "eplus (イープラス)", color: "text-pink-400" };
+    if (lowercaseUrl.includes("livenation"))
+      return { platform: "Live Nation 理想國", color: "text-yellow-400" };
+    if (lowercaseUrl.includes("ticketmaster"))
+      return { platform: "Ticketmaster", color: "text-sky-400" };
+    if (lowercaseUrl.includes("confetti-web.com"))
+      return { platform: "Confetti 票務", color: "text-purple-400" };
+    if (lowercaseUrl.includes("pia.jp"))
+      return { platform: "Ticket Pia (ぴあ)", color: "text-indigo-400" };
+    if (lowercaseUrl.includes("eplus.jp"))
+      return { platform: "eplus (イープラス)", color: "text-pink-400" };
 
     return null;
   };
@@ -577,8 +852,12 @@ export default function Dashboard() {
       const isKnownPlatform = !!match;
 
       const urlParts = cleanInput.split("/");
-      let guessedTitle = urlParts[urlParts.length - 1] || urlParts[urlParts.length - 2] || "未命名網址匯入活動";
-      if (guessedTitle.length > 25) guessedTitle = guessedTitle.substring(0, 22) + "...";
+      let guessedTitle =
+        urlParts[urlParts.length - 1] ||
+        urlParts[urlParts.length - 2] ||
+        "未命名網址匯入活動";
+      if (guessedTitle.length > 25)
+        guessedTitle = guessedTitle.substring(0, 22) + "...";
       guessedTitle = `🌐 網址：${guessedTitle.toUpperCase()}`;
 
       const fallbackNotes = isKnownPlatform
@@ -591,7 +870,9 @@ export default function Dashboard() {
         artist: "隨網址自動辨識建構",
         type: "official",
         location:
-          text.includes("eplus") || text.includes("pia.jp") || text.includes("confetti")
+          text.includes("eplus") ||
+          text.includes("pia.jp") ||
+          text.includes("confetti")
             ? "日本現地會場"
             : "未指定地點 (請展開本卡片手動微調)",
         showDate: "2026-12-31 19:00",
@@ -601,8 +882,16 @@ export default function Dashboard() {
         userNotes: fallbackNotes,
         expenses: [{ item: "預估票規費項目", cost: 0 }],
         ticketStages: [
-          { stageName: "網址情報源已鎖定", saleTime: "即日起", status: "active" },
-          { stageName: "使用者自訂管制點", saleTime: "2026-12-31 12:00", status: "active" },
+          {
+            stageName: "網址情報源已鎖定",
+            saleTime: "即日起",
+            status: "active",
+          },
+          {
+            stageName: "使用者自訂管制點",
+            saleTime: "2026-12-31 12:00",
+            status: "active",
+          },
         ],
         fanEvents: [],
         curatedShops: [],
@@ -614,7 +903,10 @@ export default function Dashboard() {
 
       const finalEvents = [newUrlEvent, ...events];
       setEvents(finalEvents);
-      localStorage.setItem("nonstop_challenger_events", JSON.stringify(finalEvents));
+      localStorage.setItem(
+        "nonstop_challenger_events",
+        JSON.stringify(finalEvents)
+      );
 
       setAiNotice(
         isKnownPlatform
@@ -638,7 +930,11 @@ export default function Dashboard() {
     }
 
     // 新增活動指令
-    if (text.startsWith("新建:") || text.startsWith("新建：") || text.startsWith("add:")) {
+    if (
+      text.startsWith("新建:") ||
+      text.startsWith("新建：") ||
+      text.startsWith("add:")
+    ) {
       const cleanText = cleanInput.substring(3).trim();
       const parts = cleanText.split(/[,，]/);
 
@@ -652,7 +948,10 @@ export default function Dashboard() {
           id: `dynamic-event-${Date.now()}`,
           title: title,
           artist: artist,
-          type: title.includes("研討會") || title.includes("講座") ? "seminar" : "official",
+          type:
+            title.includes("研討會") || title.includes("講座")
+              ? "seminar"
+              : "official",
           location: location,
           showDate: showDate,
           agency: "AI 動態生成專案",
@@ -662,7 +961,11 @@ export default function Dashboard() {
           expenses: [{ item: "預估票面費", cost: 3600 }],
           ticketStages: [
             { stageName: "系統開放登記", saleTime: "即日起", status: "ended" },
-            { stageName: "抽選公佈與付費", saleTime: `${showDate.split(" ")[0]} 12:00`, status: "drawing" },
+            {
+              stageName: "抽選公佈與付費",
+              saleTime: `${showDate.split(" ")[0]} 12:00`,
+              status: "drawing",
+            },
           ],
           fanEvents: [],
           curatedShops: [],
@@ -674,14 +977,20 @@ export default function Dashboard() {
 
         const finalEvents = [newEvent, ...events];
         setEvents(finalEvents);
-        localStorage.setItem("nonstop_challenger_events", JSON.stringify(finalEvents));
+        localStorage.setItem(
+          "nonstop_challenger_events",
+          JSON.stringify(finalEvents)
+        );
 
         const updatedSplits = {
           ...ticketSplits,
           [newEvent.id]: { total: 1, split: 0 },
         };
         setTicketSplits(updatedSplits);
-        localStorage.setItem("nonstop_challenger_splits", JSON.stringify(updatedSplits));
+        localStorage.setItem(
+          "nonstop_challenger_splits",
+          JSON.stringify(updatedSplits)
+        );
 
         setAiNotice(`✨ [AI 動態建構成功]：\n已成功新增【${title}】！`);
         setAiInput("");
@@ -690,24 +999,53 @@ export default function Dashboard() {
     }
 
     // 智慧語意狀態更新系統
-    const isNegative = text.includes("沒") || text.includes("無") || text.includes("不") || text.includes("未") || text.includes("敗") || text.includes("落選");
+    const isNegative =
+      text.includes("沒") ||
+      text.includes("無") ||
+      text.includes("不") ||
+      text.includes("未") ||
+      text.includes("敗") ||
+      text.includes("落選");
 
     if (text.includes("優里") || text.includes("yuuri")) {
-      if ((text.includes("中選") || text.includes("買到") || text.includes("中票")) && !isNegative) {
+      if (
+        (text.includes("中選") ||
+          text.includes("買到") ||
+          text.includes("中票")) &&
+        !isNegative
+      ) {
         updatedEvents = updatedEvents.map((event) =>
-          event.id === "event-yuuri-004" ? { ...event, statusLifecycle: "purchased" } : event
+          event.id === "event-yuuri-004"
+            ? { ...event, statusLifecycle: "purchased" }
+            : event
         );
-        noticeMessages.push("🎟️ 已將【優里】狀態更新為【購入完成】！資金已從預備金正式扣減。");
-      } else if (isNegative && (text.includes("沒") || text.includes("落選") || text.includes("未中選"))) {
+        noticeMessages.push(
+          "🎟️ 已將【優里】狀態更新為【購入完成】！資金已從預備金正式扣減。"
+        );
+      } else if (
+        isNegative &&
+        (text.includes("沒") ||
+          text.includes("落選") ||
+          text.includes("未中選"))
+      ) {
         const targetEvent = events.find((e) => e.id === "event-yuuri-004");
-        if (targetEvent && (targetEvent.statusLifecycle === "applied_drawing" || targetEvent.statusLifecycle === "waiting_list")) {
-          const cost = targetEvent.expenses.reduce((sum, exp) => sum + exp.cost, 0);
+        if (
+          targetEvent &&
+          (targetEvent.statusLifecycle === "applied_drawing" ||
+            targetEvent.statusLifecycle === "waiting_list")
+        ) {
+          const cost = targetEvent.expenses.reduce(
+            (sum, exp) => sum + exp.cost,
+            0
+          );
           setReleasedAmount(cost);
           setTimeout(() => setReleasedAmount(null), 5000);
         }
 
         updatedEvents = updatedEvents.map((event) =>
-          event.id === "event-yuuri-004" ? { ...event, statusLifecycle: "ended_no_ticket" } : event
+          event.id === "event-yuuri-004"
+            ? { ...event, statusLifecycle: "ended_no_ticket" }
+            : event
         );
         noticeMessages.push("😢 偵測到優里落選，已設為【遺憾落選】。");
       }
@@ -719,11 +1057,16 @@ export default function Dashboard() {
       setPreviousOffsets({ ...eventOffsets });
 
       setEvents(updatedEvents);
-      localStorage.setItem("nonstop_challenger_events", JSON.stringify(updatedEvents));
+      localStorage.setItem(
+        "nonstop_challenger_events",
+        JSON.stringify(updatedEvents)
+      );
       setAiNotice(`⚡ AI 語意分析連動成功：\n${noticeMessages.join("\n")}`);
       setAiInput("");
     } else {
-      setAiNotice(`💡 系統已收到您的感測指令：\n"${cleanInput}"\n※ 貼上售票網址、或使用「新建:」公式，按下 Enter 即可自動建構！`);
+      setAiNotice(
+        `💡 系統已收到您的感測指令：\n"${cleanInput}"\n※ 貼上售票網址、或使用「新建:」公式，按下 Enter 即可自動建構！`
+      );
       setAiInput("");
     }
   };
@@ -739,7 +1082,8 @@ export default function Dashboard() {
     const oldEvent = events.find((e) => e.id === id);
     if (
       oldEvent &&
-      (oldEvent.statusLifecycle === "applied_drawing" || oldEvent.statusLifecycle === "waiting_list") &&
+      (oldEvent.statusLifecycle === "applied_drawing" ||
+        oldEvent.statusLifecycle === "waiting_list") &&
       newStatus === "ended_no_ticket"
     ) {
       const cost = oldEvent.expenses.reduce((sum, exp) => sum + exp.cost, 0);
@@ -775,8 +1119,18 @@ export default function Dashboard() {
       setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
       setEventRoles({});
       setChecklist([
-        { id: "1", text: "確認護照效期大於 6 個月", completed: false, notes: "抽屜第二格" },
-        { id: "2", text: "開通海外信用卡刷卡與海外提款", completed: false, notes: "主刷中信/備用富邦" },
+        {
+          id: "1",
+          text: "確認護照效期大於 6 個月",
+          completed: false,
+          notes: "抽屜第二格",
+        },
+        {
+          id: "2",
+          text: "開通海外信用卡刷卡與海外提款",
+          completed: false,
+          notes: "主刷中信/備用富邦",
+        },
       ]);
       setAlarms({});
       setRates({ TWD: 1, USD: 0.031, JPY: 4.85, EUR: 0.029 });
@@ -784,7 +1138,11 @@ export default function Dashboard() {
     }
   };
 
-  const getGoogleCalendarLink = (title: string, dateStr: string, details: string) => {
+  const getGoogleCalendarLink = (
+    title: string,
+    dateStr: string,
+    details: string
+  ) => {
     let cleanDate = "";
     for (let i = 0; i < dateStr.length; i++) {
       const char = dateStr.charAt(i);
@@ -793,23 +1151,50 @@ export default function Dashboard() {
       }
     }
 
-    const dateFormatted = cleanDate.length >= 8 ? cleanDate.substring(0, 8) : "20261231";
-    const startTime = cleanDate.length >= 12 ? cleanDate.substring(0, 12) : `${dateFormatted}T120000`;
-    const endTime = cleanDate.length >= 12
-      ? `${cleanDate.substring(0, 8)}T${(parseInt(cleanDate.substring(8, 10)) + 3).toString().padStart(2, "0")}${cleanDate.substring(10, 12)}`
-      : `${dateFormatted}T150000`;
+    const dateFormatted =
+      cleanDate.length >= 8 ? cleanDate.substring(0, 8) : "20261231";
+    const startTime =
+      cleanDate.length >= 12
+        ? cleanDate.substring(0, 12)
+        : `${dateFormatted}T120000`;
+    const endTime =
+      cleanDate.length >= 12
+        ? `${cleanDate.substring(0, 8)}T${(
+            parseInt(cleanDate.substring(8, 10)) + 3
+          )
+            .toString()
+            .padStart(2, "0")}${cleanDate.substring(10, 12)}`
+        : `${dateFormatted}T150000`;
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
       title
     )}&dates=${startTime}/${endTime}&details=${encodeURIComponent(details)}`;
   };
 
   const statusBadges = {
-    watchlist: { label: "👀 觀察中", color: "bg-slate-800 text-slate-300 border-slate-700" },
-    applied_drawing: { label: "🗳️ 已登記抽選", color: "bg-blue-950/50 text-blue-400 border-blue-800" },
-    purchased: { label: "🎟️ 購入完成", color: "bg-emerald-950/50 text-emerald-400 border-emerald-800" },
-    ticket_splitting: { label: "📲 電子票分票中", color: "bg-indigo-950/50 text-indigo-400 border-indigo-800" },
-    waiting_list: { label: "⏳ 等待候補中", color: "bg-amber-950/50 text-amber-400 border-amber-800" },
-    ended_no_ticket: { label: "❌ 遺憾落選", color: "bg-rose-950/50 text-rose-400 border-rose-900" },
+    watchlist: {
+      label: "👀 觀察中",
+      color: "bg-slate-800 text-slate-300 border-slate-700",
+    },
+    applied_drawing: {
+      label: "🗳️ 已登記抽選",
+      color: "bg-blue-950/50 text-blue-400 border-blue-800",
+    },
+    purchased: {
+      label: "🎟️ 購入完成",
+      color: "bg-emerald-950/50 text-emerald-400 border-emerald-800",
+    },
+    ticket_splitting: {
+      label: "📲 電子票分票中",
+      color: "bg-indigo-950/50 text-indigo-400 border-indigo-800",
+    },
+    waiting_list: {
+      label: "⏳ 等待候補中",
+      color: "bg-amber-950/50 text-amber-400 border-amber-800",
+    },
+    ended_no_ticket: {
+      label: "❌ 遺憾落選",
+      color: "bg-rose-950/50 text-rose-400 border-rose-900",
+    },
   };
 
   const categoryLabels: Record<string, string> = {
@@ -823,16 +1208,32 @@ export default function Dashboard() {
   };
 
   const confirmedExpenses = events
-    .filter((e) => e.statusLifecycle === "purchased" || e.statusLifecycle === "ticket_splitting")
-    .reduce((sum, e) => sum + e.expenses.reduce((s, exp) => s + exp.cost, 0), 0);
+    .filter(
+      (e) =>
+        e.statusLifecycle === "purchased" ||
+        e.statusLifecycle === "ticket_splitting"
+    )
+    .reduce(
+      (sum, e) => sum + e.expenses.reduce((s, exp) => s + exp.cost, 0),
+      0
+    );
 
   const drawingExpenses = events
-    .filter((e) => e.statusLifecycle === "applied_drawing" || e.statusLifecycle === "waiting_list")
-    .reduce((sum, e) => sum + e.expenses.reduce((s, exp) => s + exp.cost, 0), 0);
+    .filter(
+      (e) =>
+        e.statusLifecycle === "applied_drawing" ||
+        e.statusLifecycle === "waiting_list"
+    )
+    .reduce(
+      (sum, e) => sum + e.expenses.reduce((s, exp) => s + exp.cost, 0),
+      0
+    );
 
   const filteredEvents = events.filter((event) => {
-    const matchesCategory = categoryFilter === "all" || event.type === categoryFilter;
-    const matchesStatus = statusFilter === "all" || event.statusLifecycle === statusFilter;
+    const matchesCategory =
+      categoryFilter === "all" || event.type === categoryFilter;
+    const matchesStatus =
+      statusFilter === "all" || event.statusLifecycle === statusFilter;
     const matchesSearch =
       event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       event.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -862,6 +1263,31 @@ export default function Dashboard() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+          {/* Excel/CSV 參戰清單控制 */}
+          <div className="flex items-center bg-slate-900 border border-purple-900/40 rounded-lg p-0.5 shadow-lg">
+            <button
+              onClick={exportChecklistToCsv}
+              className="flex items-center gap-1 text-[11px] text-purple-300 hover:text-white hover:bg-purple-950/40 px-2 py-1 rounded transition-colors"
+              title="匯出購入與登記的參戰清單 (.csv)"
+            >
+              <FileSpreadsheet size={12} /> 匯出參戰 Excel
+            </button>
+            <input
+              type="file"
+              ref={csvInputRef}
+              onChange={handleImportCsvChecklist}
+              accept=".csv"
+              className="hidden"
+            />
+            <button
+              onClick={() => csvInputRef.current?.click()}
+              className="flex items-center gap-1 text-[11px] text-purple-300 hover:text-white hover:bg-purple-950/40 px-2 py-1 rounded transition-colors border-l border-slate-800"
+              title="疊加匯入朋友的活動清單"
+            >
+              <Upload size={12} /> 匯入參戰 CSV
+            </button>
+          </div>
+
           {/* 語系切換 */}
           <button
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}
@@ -933,7 +1359,8 @@ export default function Dashboard() {
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
-              <List size={14} /> {lang === "zh" ? "搶票管制點" : "Key Timelines"}
+              <List size={14} />{" "}
+              {lang === "zh" ? "搶票管制點" : "Key Timelines"}
             </button>
           </div>
         </div>
@@ -943,19 +1370,25 @@ export default function Dashboard() {
         {/* 貨幣匯率小工具 */}
         <section className="bg-slate-900 rounded-xl border border-slate-800 p-3 shadow-md flex flex-wrap items-center justify-between gap-3 text-xs">
           <span className="text-slate-400 font-medium flex items-center gap-1">
-            <TrendingUp size={14} className="text-purple-400" /> {t.currencyWidget}
+            <TrendingUp size={14} className="text-purple-400" />{" "}
+            {t.currencyWidget}
           </span>
           <div className="flex flex-wrap gap-4 items-center">
             {["USD", "JPY", "EUR"].map((cur) => {
               const curKey = cur as "USD" | "JPY" | "EUR";
               return (
-                <div key={cur} className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded px-2 py-1">
+                <div
+                  key={cur}
+                  className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded px-2 py-1"
+                >
                   <span className="text-slate-500 uppercase">{cur}:</span>
                   <input
                     type="number"
                     step="0.0001"
                     value={rates[curKey]}
-                    onChange={(e) => handleRateChange(curKey, parseFloat(e.target.value) || 0)}
+                    onChange={(e) =>
+                      handleRateChange(curKey, parseFloat(e.target.value) || 0)
+                    }
                     className="bg-transparent text-slate-300 w-16 focus:outline-none font-mono text-xs"
                   />
                 </div>
@@ -964,7 +1397,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* 全球財務預算卡片 (在選定幣值情形下，自動調整成同一幣值) */}
+        {/* 全球財務預算卡片 */}
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg relative overflow-hidden group">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
@@ -976,7 +1409,9 @@ export default function Dashboard() {
                 {formatAmount(confirmedExpenses)}
               </h3>
               <p className="text-[10px] text-slate-500 mt-1">
-                {lang === "zh" ? "已確認購入之項目規費支出" : "Confirmed expenses for purchased items"}
+                {lang === "zh"
+                  ? "已確認購入之項目規費支出"
+                  : "Confirmed expenses for purchased items"}
               </p>
             </div>
             <div className="bg-emerald-950/30 p-2.5 rounded-lg border border-emerald-900/40 text-emerald-400">
@@ -994,7 +1429,9 @@ export default function Dashboard() {
                 {formatAmount(drawingExpenses)}
               </h3>
               <p className="text-[10px] text-slate-500 mt-1">
-                {lang === "zh" ? "登記/候補中暫時凍結的預備規費" : "Temporarily locked escrow funds"}
+                {lang === "zh"
+                  ? "登記/候補中暫時凍結的預備規費"
+                  : "Temporarily locked escrow funds"}
               </p>
             </div>
             <div className="bg-amber-950/30 p-2.5 rounded-lg border border-amber-900/40 text-amber-400">
@@ -1012,7 +1449,9 @@ export default function Dashboard() {
                 {formatAmount(confirmedExpenses + drawingExpenses)}
               </h3>
               <p className="text-[10px] text-slate-500 mt-1">
-                {lang === "zh" ? "本季度最大可能流動規費與票面預算" : "Maximum possible flow volume this quarter"}
+                {lang === "zh"
+                  ? "本季度最大可能流動規費與票面預算"
+                  : "Maximum possible flow volume this quarter"}
               </p>
             </div>
             <div className="bg-purple-950/30 p-2.5 rounded-lg border border-purple-900/40 text-purple-400">
@@ -1025,10 +1464,16 @@ export default function Dashboard() {
         <section className="bg-slate-900 rounded-xl border border-slate-800 p-4 shadow-xl">
           <div className="flex items-center justify-between mb-3 text-purple-400 font-medium text-sm">
             <span className="flex items-center gap-2">
-              <Sparkles size={16} /> {lang === "zh" ? "語意動態感測與卡片建構入口" : "Semantic Intelligence Entry"}
+              <Sparkles size={16} />{" "}
+              {lang === "zh"
+                ? "語意動態感測與卡片建構入口"
+                : "Semantic Intelligence Entry"}
             </span>
             <span className="text-[10px] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded text-emerald-400 font-medium">
-              💡 {lang === "zh" ? "直接在下方貼上網址並按 Enter！" : "Directly paste ticketing link and press Enter!"}
+              💡{" "}
+              {lang === "zh"
+                ? "直接在下方貼上網址並按 Enter！"
+                : "Directly paste ticketing link and press Enter!"}
             </span>
           </div>
 
@@ -1037,7 +1482,11 @@ export default function Dashboard() {
               value={aiInput}
               onChange={(e) => setAiInput(e.target.value)}
               onKeyDown={handleKeyDownInput}
-              placeholder={lang === "zh" ? "在此貼上任何售票網址（如 拓元/KKTIX/OPENTIX/eplus/pia 等）或輸入指令，完成後按 Enter！" : "Paste ticketing links (tixCraft/KKTIX/OPENTIX/eplus/pia) or command, then press Enter!"}
+              placeholder={
+                lang === "zh"
+                  ? "在此貼上任何售票網址（如 拓元/KKTIX/OPENTIX/eplus/pia 等）或輸入指令，完成後按 Enter！"
+                  : "Paste ticketing links (tixCraft/KKTIX/OPENTIX/eplus/pia) or command, then press Enter!"
+              }
               className="flex-grow bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-16 resize-none"
             />
             <button
@@ -1058,7 +1507,8 @@ export default function Dashboard() {
                   onClick={triggerUndo}
                   className="flex items-center gap-1.5 bg-purple-900/40 hover:bg-purple-800 border border-purple-700 hover:border-purple-600 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-purple-200 transition-all shadow-md active:scale-95 flex-shrink-0"
                 >
-                  <RotateCcw size={12} /> ↩️ {lang === "zh" ? "撤銷 (Ctrl+Z)" : "Undo (Ctrl+Z)"}
+                  <RotateCcw size={12} /> ↩️{" "}
+                  {lang === "zh" ? "撤銷 (Ctrl+Z)" : "Undo (Ctrl+Z)"}
                 </button>
               )}
             </div>
@@ -1068,7 +1518,10 @@ export default function Dashboard() {
         {/* 搜尋與過濾 */}
         <section className="space-y-3">
           <div className="relative">
-            <Search className="absolute left-3 top-3 text-slate-500" size={18} />
+            <Search
+              className="absolute left-3 top-3 text-slate-500"
+              size={18}
+            />
             <input
               type="text"
               placeholder={t.searchPlaceholder}
@@ -1121,24 +1574,35 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* 雙欄布局：左側活動卡片列表 / 右側旅遊隨身清單 */}
+        {/* 雙欄布局 */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 左側：活動列表 (佔用 2 欄) */}
+          {/* 左側：活動列表 */}
           <div className="lg:col-span-2 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredEvents.map((event) => {
                 const isExpanded = expandedCard === event.id;
-                const badge = statusBadges[event.statusLifecycle] || statusBadges.watchlist;
-                const totalCost = event.expenses.reduce((sum, exp) => sum + exp.cost, 0);
+                const badge =
+                  statusBadges[event.statusLifecycle] || statusBadges.watchlist;
+                const totalCost = event.expenses.reduce(
+                  (sum, exp) => sum + exp.cost,
+                  0
+                );
 
                 const conflicts = getConflictingEvents(event);
                 const hasConflict = conflicts.length > 0;
                 const currentRole = eventRoles[event.id] || null;
+                const venueOffset =
+                  eventOffsets[event.id] !== undefined
+                    ? eventOffsets[event.id]
+                    : browserOffset;
 
-                const venueOffset = eventOffsets[event.id] !== undefined ? eventOffsets[event.id] : browserOffset;
-
-                // 鬧鐘配置
-                const alarmConfig = alarms[event.id] || { enabled: false, minutesAhead: 30 };
+                const alarmConfig = alarms[event.id] || {
+                  enabled: false,
+                  minutesAhead: 30,
+                };
+                const nextSaleStage = event.ticketStages.find(
+                  (s) => s.status !== "ended"
+                );
 
                 return (
                   <div
@@ -1151,9 +1615,10 @@ export default function Dashboard() {
                   >
                     <div
                       className="p-4 cursor-pointer"
-                      onClick={() => setExpandedCard(isExpanded ? null : event.id)}
+                      onClick={() =>
+                        setExpandedCard(isExpanded ? null : event.id)
+                      }
                     >
-                      {/* 卡片頭部 */}
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-mono tracking-wider">
@@ -1161,16 +1626,20 @@ export default function Dashboard() {
                           </span>
                           {currentRole === "primary" && (
                             <span className="flex items-center gap-0.5 text-[10px] bg-amber-950 text-amber-400 border border-amber-900 px-1.5 py-0.5 rounded">
-                              <Star size={10} className="fill-amber-400" /> {lang === "zh" ? "主案" : "Primary"}
+                              <Star size={10} className="fill-amber-400" />{" "}
+                              {lang === "zh" ? "主案" : "Primary"}
                             </span>
                           )}
                           {currentRole === "backup" && (
                             <span className="flex items-center gap-0.5 text-[10px] bg-slate-950 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">
-                              <Shield size={10} /> {lang === "zh" ? "備案" : "Backup"}
+                              <Shield size={10} />{" "}
+                              {lang === "zh" ? "備案" : "Backup"}
                             </span>
                           )}
                         </div>
-                        <span className={`text-[10px] border px-2 py-0.5 rounded-md font-medium transition-colors ${badge.color}`}>
+                        <span
+                          className={`text-[10px] border px-2 py-0.5 rounded-md font-medium transition-colors ${badge.color}`}
+                        >
                           {badge.label}
                         </span>
                       </div>
@@ -1183,7 +1652,6 @@ export default function Dashboard() {
                       </p>
 
                       <div className="bg-slate-950/60 rounded-lg p-2 border border-slate-800/50 space-y-1.5 text-xs">
-                        {/* 雙軌並排展示 */}
                         <div className="space-y-1">
                           <div className="flex justify-between items-center text-purple-300 font-medium">
                             <span className="flex items-center gap-1">
@@ -1201,7 +1669,10 @@ export default function Dashboard() {
                               🏠 {lang === "zh" ? "您的本地時間" : "Local Time"}
                             </span>
                             <span className="font-mono">
-                              {convertToUserLocalTime(event.showDate, venueOffset)}{" "}
+                              {convertToUserLocalTime(
+                                event.showDate,
+                                venueOffset
+                              )}{" "}
                               <span className="text-[8px] text-emerald-500">
                                 ({formatGmtLabel(browserOffset)})
                               </span>
@@ -1209,14 +1680,31 @@ export default function Dashboard() {
                           </div>
                         </div>
 
-                        {/* 金額調整（同一幣值） */}
+                        {/* 售票動態倒計時注入 */}
+                        {nextSaleStage && (
+                          <div className="flex justify-between items-center pt-1 border-t border-slate-950/80">
+                            <span className="text-indigo-300 font-medium flex items-center gap-1">
+                              <Clock size={12} />{" "}
+                              {lang === "zh"
+                                ? "售票倒計時"
+                                : "Ticket Countdown"}
+                            </span>
+                            <TicketCountdown
+                              saleTimeStr={nextSaleStage.saleTime}
+                              venueOffset={venueOffset}
+                              t={t}
+                            />
+                          </div>
+                        )}
+
                         <div className="flex justify-between items-center pt-1 border-t border-slate-950/80 text-amber-400 font-mono">
-                          <span>💰 {lang === "zh" ? "預估規費/票面價" : "Est. Cost"}</span>
+                          <span>
+                            💰 {lang === "zh" ? "預估規費/票面價" : "Est. Cost"}
+                          </span>
                           <span>{formatAmount(totalCost)}</span>
                         </div>
                       </div>
 
-                      {/* 3小時時間防撞警告 */}
                       {hasConflict && (
                         <div className="mt-3 flex items-center gap-1.5 bg-rose-950/30 border border-rose-900/40 text-rose-400 px-2.5 py-1.5 rounded-lg text-[10px]">
                           <AlertTriangle
@@ -1229,10 +1717,12 @@ export default function Dashboard() {
                         </div>
                       )}
 
-                      {/* 一鍵導航 */}
                       <div className="flex items-center justify-between mt-3 text-xs">
                         <div className="flex items-center gap-1 text-slate-400 max-w-[70%]">
-                          <MapPin size={12} className="text-rose-400 flex-shrink-0" />
+                          <MapPin
+                            size={12}
+                            className="text-rose-400 flex-shrink-0"
+                          />
                           <span className="truncate">{event.location}</span>
                         </div>
                         <a
@@ -1242,7 +1732,8 @@ export default function Dashboard() {
                           className="flex items-center gap-1 text-[10px] bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800/80 px-2 py-1 rounded transition-all font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <Navigation size={10} /> {lang === "zh" ? "導航" : "Navigate"}
+                          <Navigation size={10} />{" "}
+                          {lang === "zh" ? "導航" : "Navigate"}
                         </a>
                       </div>
                     </div>
@@ -1254,7 +1745,9 @@ export default function Dashboard() {
                           <div className="flex items-center justify-between">
                             <span className="font-semibold text-[11px] text-slate-200 flex items-center gap-1">
                               <Bell size={12} className="text-indigo-400" />
-                              {lang === "zh" ? "活動日程提示鬧鐘" : "Event Alarm Notification"}
+                              {lang === "zh"
+                                ? "活動日程提示鬧鐘"
+                                : "Event Alarm Notification"}
                             </span>
                             <button
                               onClick={(e) => {
@@ -1268,18 +1761,29 @@ export default function Dashboard() {
                               }`}
                             >
                               {alarmConfig.enabled ? (
-                                <><Bell size={10} /> {t.alarmSet}</>
+                                <>
+                                  <Bell size={10} /> {t.alarmSet}
+                                </>
                               ) : (
-                                <><BellOff size={10} /> {t.alarmOff}</>
+                                <>
+                                  <BellOff size={10} /> {t.alarmOff}
+                                </>
                               )}
                             </button>
                           </div>
                           {alarmConfig.enabled && (
                             <div className="flex items-center gap-2 mt-2 bg-slate-950 p-2 rounded border border-slate-800/80">
-                              <span className="text-slate-400 text-[10px]">{t.alarmAhead}:</span>
+                              <span className="text-slate-400 text-[10px]">
+                                {t.alarmAhead}:
+                              </span>
                               <select
                                 value={alarmConfig.minutesAhead}
-                                onChange={(e) => updateAlarmTime(event.id, parseInt(e.target.value))}
+                                onChange={(e) =>
+                                  updateAlarmTime(
+                                    event.id,
+                                    parseInt(e.target.value)
+                                  )
+                                }
                                 className="bg-slate-900 text-slate-300 border border-slate-800 rounded px-1 py-0.5 text-[10px]"
                               >
                                 <option value="10">10 {t.minutes}</option>
@@ -1295,7 +1799,9 @@ export default function Dashboard() {
                         <div className="space-y-2">
                           <h4 className="text-slate-400 font-medium flex items-center gap-1">
                             <Map size={12} className="text-purple-400" />
-                            {lang === "zh" ? "🗺️ 現地會場街景與周邊地圖" : "🏟️ Venue & Surrounding Map"}
+                            {lang === "zh"
+                              ? "🗺️ 現地會場街景與周邊地圖"
+                              : "🏟️ Venue & Surrounding Map"}
                           </h4>
                           <div className="w-full h-40 rounded-lg overflow-hidden border border-slate-800 bg-slate-950 relative">
                             <iframe
@@ -1304,11 +1810,11 @@ export default function Dashboard() {
                               height="100%"
                               frameBorder="0"
                               scrolling="no"
-                              marginHeight={0}
-                              marginWidth={0}
                               src={getEmbedMapIframeUrl(event.location)}
                               className="opacity-80 hover:opacity-100 transition-opacity"
-                              style={{ filter: "invert(90%) hue-rotate(180deg)" }}
+                              style={{
+                                filter: "invert(90%) hue-rotate(180deg)",
+                              }}
                             />
                           </div>
                         </div>
@@ -1318,35 +1824,45 @@ export default function Dashboard() {
                           <div className="flex items-center justify-between">
                             <span className="font-semibold text-[11px] text-slate-200 flex items-center gap-1">
                               <Globe size={12} className="text-purple-400" />
-                              {lang === "zh" ? "🌍 舉辦地時區配置" : "🌍 Venue Timezone Settings"}
+                              {lang === "zh"
+                                ? "🌍 舉辦地時區配置"
+                                : "🌍 Venue Timezone Settings"}
                             </span>
                             <select
                               value={venueOffset}
                               onChange={(e) => {
                                 const newOffset = parseInt(e.target.value);
-                                const updatedOffsets = {
+                                saveOffsetsToStorage({
                                   ...eventOffsets,
                                   [event.id]: newOffset,
-                                };
-                                saveOffsetsToStorage(updatedOffsets);
+                                });
                               }}
                               className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-300 font-mono focus:outline-none"
                             >
                               {availableOffsets.map((offset) => (
                                 <option key={offset} value={offset}>
                                   {formatGmtLabel(offset)}{" "}
-                                  {offset === 8 ? " (台北/北京/港)" : offset === 9 ? " (東京/首爾)" : offset === 0 ? " (倫敦/UTC)" : ""}
+                                  {offset === 8
+                                    ? " (台北/北京/港)"
+                                    : offset === 9
+                                    ? " (東京/首爾)"
+                                    : offset === 0
+                                    ? " (倫敦/UTC)"
+                                    : ""}
                                 </option>
                               ))}
                             </select>
                           </div>
                         </div>
 
-                        {/* 同日行程 3 小時防撞調配 */}
+                        {/* 同日行程 3 小時防撞 */}
                         {hasConflict && (
                           <div className="bg-slate-900 border border-slate-800/80 rounded-lg p-3">
                             <p className="font-semibold text-[11px] text-rose-400 flex items-center gap-1">
-                              <AlertTriangle size={12} /> {lang === "zh" ? "時間相近行程防撞調配" : "Schedule Conflict Resolution"}
+                              <AlertTriangle size={12} />{" "}
+                              {lang === "zh"
+                                ? "時間相近行程防撞調配"
+                                : "Schedule Conflict Resolution"}
                             </p>
                             <div className="flex gap-2 mt-2">
                               <button
@@ -1362,20 +1878,22 @@ export default function Dashboard() {
                                 }}
                                 className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-amber-950/40 border-amber-500 text-amber-400"
                               >
-                                <Star size={10} className="fill-amber-400" />
-                                {lang === "zh" ? "設為此時段主案" : "Set Primary"}
+                                <Star size={10} className="fill-amber-400" />{" "}
+                                {lang === "zh"
+                                  ? "設為此時段主案"
+                                  : "Set Primary"}
                               </button>
                               <button
                                 onClick={() => {
-                                  const newRoles = {
+                                  saveRolesToStorage({
                                     ...eventRoles,
                                     [event.id]: "backup" as const,
-                                  };
-                                  saveRolesToStorage(newRoles);
+                                  });
                                 }}
                                 className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-slate-900 border-slate-800 text-slate-400"
                               >
-                                <Shield size={10} /> {lang === "zh" ? "設為備案" : "Set Backup"}
+                                <Shield size={10} />{" "}
+                                {lang === "zh" ? "設為備案" : "Set Backup"}
                               </button>
                             </div>
                           </div>
@@ -1386,23 +1904,33 @@ export default function Dashboard() {
                           <div className="flex justify-between items-start gap-2">
                             <div>
                               <p className="font-semibold text-[11px] text-slate-200">
-                                ⏱️ {lang === "zh" ? "日期追蹤管制" : "Timeline Tracking"}
+                                ⏱️{" "}
+                                {lang === "zh"
+                                  ? "日期追蹤管制"
+                                  : "Timeline Tracking"}
                               </p>
                               <p className="text-[10px] text-slate-400 mt-1">
-                                {lang === "zh" ? "匯入日曆時，系統會自動標註時區換算與連結資訊。" : "Exports events with automatic timezone translations."}
+                                {lang === "zh"
+                                  ? "匯入日曆時，系統會自動標註時區換算與連結資訊。"
+                                  : "Exports events with automatic timezone translations."}
                               </p>
                             </div>
                             <a
                               href={getGoogleCalendarLink(
                                 event.title,
                                 event.showDate,
-                                `[時區資訊] 舉辦地時區: ${formatGmtLabel(venueOffset)}\n\n原始網址情報源: ${event.sourceUrl}`
+                                `舉辦地時區: ${formatGmtLabel(
+                                  venueOffset
+                                )}\n\n情報連結: ${event.sourceUrl}`
                               )}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-700/80 hover:border-indigo-600 px-2 py-1.5 rounded text-[10px] font-medium text-indigo-200 transition-colors whitespace-nowrap flex-shrink-0"
                             >
-                              ➕ {lang === "zh" ? "匯入 Google 日曆" : "Add to Google Calendar"}
+                              ➕{" "}
+                              {lang === "zh"
+                                ? "匯入 Google 日曆"
+                                : "Add to Google Calendar"}
                             </a>
                           </div>
                         </div>
@@ -1410,16 +1938,27 @@ export default function Dashboard() {
                         {/* 變更狀態 */}
                         <div className="flex items-center justify-between bg-slate-900/50 p-2.5 rounded-lg border border-slate-800">
                           <span className="font-medium text-slate-400">
-                            {lang === "zh" ? "變更活動狀態流程：" : "Change Lifecycle Stage:"}
+                            {lang === "zh"
+                              ? "變更活動狀態流程："
+                              : "Change Stage:"}
                           </span>
                           <select
                             value={event.statusLifecycle}
-                            onChange={(e) => handleStatusChange(event.id, e.target.value as any)}
+                            onChange={(e) =>
+                              handleStatusChange(
+                                event.id,
+                                e.target.value as any
+                              )
+                            }
                             className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none"
                           >
                             {Object.keys(statusBadges).map((statusKey) => (
                               <option key={statusKey} value={statusKey}>
-                                {statusBadges[statusKey as keyof typeof statusBadges].label}
+                                {
+                                  statusBadges[
+                                    statusKey as keyof typeof statusBadges
+                                  ].label
+                                }
                               </option>
                             ))}
                           </select>
@@ -1427,13 +1966,18 @@ export default function Dashboard() {
 
                         <div>
                           <h4 className="text-slate-400 font-medium flex items-center gap-1 mb-1">
-                            <FileText size={12} /> {lang === "zh" ? "個人隨手彈性備註" : "Internal Notes"}
+                            <FileText size={12} />{" "}
+                            {lang === "zh"
+                              ? "個人隨手彈性備註"
+                              : "Internal Notes"}
                           </h4>
                           <textarea
                             value={event.userNotes}
-                            onChange={(e) => handleNotesChange(event.id, e.target.value)}
+                            onChange={(e) =>
+                              handleNotesChange(event.id, e.target.value)
+                            }
                             placeholder="輸入私人備忘，系統會自動儲存..."
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-14 resize-none"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none h-14 resize-none"
                           />
                         </div>
                       </div>
@@ -1450,13 +1994,20 @@ export default function Dashboard() {
                           rel="noopener noreferrer"
                           className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-2.5 py-1.5 rounded-lg transition-all border border-slate-700 font-medium"
                         >
-                          {lang === "zh" ? "官方情報網址" : "Official Info"} <ExternalLink size={10} />
+                          {lang === "zh" ? "官方情報網址" : "Official Info"}{" "}
+                          <ExternalLink size={10} />
                         </a>
                         <button
-                          onClick={() => setExpandedCard(isExpanded ? null : event.id)}
+                          onClick={() =>
+                            setExpandedCard(isExpanded ? null : event.id)
+                          }
                           className="text-slate-400 hover:text-slate-200 p-1 bg-slate-950/40 border border-slate-800 rounded-lg"
                         >
-                          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          {isExpanded ? (
+                            <ChevronUp size={14} />
+                          ) : (
+                            <ChevronDown size={14} />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1466,13 +2017,13 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* 右側：精緻旅遊提醒清單 Checklist (佔用 1 欄) */}
+          {/* 右側：旅遊提醒清單 */}
           <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 shadow-xl flex flex-col h-fit">
             <h3 className="font-semibold text-sm text-slate-200 flex items-center gap-2 border-b border-slate-800 pb-2.5 mb-3">
-              <CheckSquare size={16} className="text-purple-400" /> {t.checklistTitle}
+              <CheckSquare size={16} className="text-purple-400" />{" "}
+              {t.checklistTitle}
             </h3>
 
-            {/* 新增項目輸入框 */}
             <div className="flex gap-1.5 mb-4">
               <input
                 type="text"
@@ -1490,9 +2041,10 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* 清單項目列表 */}
             {checklist.length === 0 ? (
-              <p className="text-xs text-slate-600 text-center py-6">{t.noChecklist}</p>
+              <p className="text-xs text-slate-600 text-center py-6">
+                {t.noChecklist}
+              </p>
             ) : (
               <div className="space-y-3 max-h-[450px] overflow-y-auto pr-1">
                 {checklist.map((item) => (
@@ -1506,11 +2058,23 @@ export default function Dashboard() {
                         className="flex items-start gap-2 text-left flex-grow focus:outline-none"
                       >
                         {item.completed ? (
-                          <CheckCircle2 size={15} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                          <CheckCircle2
+                            size={15}
+                            className="text-emerald-400 mt-0.5 flex-shrink-0"
+                          />
                         ) : (
-                          <Square size={15} className="text-slate-600 mt-0.5 flex-shrink-0" />
+                          <Square
+                            size={15}
+                            className="text-slate-600 mt-0.5 flex-shrink-0"
+                          />
                         )}
-                        <span className={`text-xs ${item.completed ? "line-through text-slate-600" : "text-slate-200 font-medium"}`}>
+                        <span
+                          className={`text-xs ${
+                            item.completed
+                              ? "line-through text-slate-600"
+                              : "text-slate-200 font-medium"
+                          }`}
+                        >
                           {item.text}
                         </span>
                       </button>
@@ -1522,13 +2086,14 @@ export default function Dashboard() {
                       </button>
                     </div>
 
-                    {/* 自訂隨手欄位備註 */}
                     <input
                       type="text"
                       value={item.notes}
-                      onChange={(e) => updateChecklistNotes(item.id, e.target.value)}
+                      onChange={(e) =>
+                        updateChecklistNotes(item.id, e.target.value)
+                      }
                       placeholder={t.memoPlaceholder}
-                      className="w-full bg-slate-900 border border-slate-800/60 rounded px-2 py-1 text-[10px] text-slate-400 placeholder:text-slate-600 focus:outline-none focus:border-indigo-600 font-sans"
+                      className="w-full bg-slate-900 border border-slate-800/60 rounded px-2 py-1 text-[10px] text-slate-400 placeholder:text-slate-600 focus:outline-none font-sans"
                     />
                   </div>
                 ))}
