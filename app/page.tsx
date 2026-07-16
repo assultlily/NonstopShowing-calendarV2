@@ -32,8 +32,6 @@ import {
   Square,
   Plus,
   Trash2,
-  Clock,
-  FileSpreadsheet,
 } from "lucide-react";
 
 // 語系字典設定
@@ -63,8 +61,6 @@ const TRANSLATIONS = {
     minutes: "分鐘",
     hours: "小時",
     alarmTriggered: "⏰ 鬧鐘提醒！活動即將開始：",
-    countdownPrefix: "⏳ 售票倒計時 ",
-    countdownEnded: "🎬 售票已開放 / 已截止",
   },
   en: {
     title: "Nonstop Challenger Inter-system Dispatch Center",
@@ -93,8 +89,6 @@ const TRANSLATIONS = {
     minutes: "mins",
     hours: "hrs",
     alarmTriggered: "⏰ Alarm Alert! Event starting soon: ",
-    countdownPrefix: "⏳ Sale starts in ",
-    countdownEnded: "🎬 Ticket Sales Started / Ended",
   },
 };
 
@@ -110,97 +104,6 @@ interface ChecklistItem {
 interface AlarmConfig {
   enabled: boolean;
   minutesAhead: number; // 提前幾分鐘
-}
-
-// ----------------------------------------------------
-// 頂層全域輔助工具宣告，徹底根絕區域 ReferenceError
-// ----------------------------------------------------
-const formatGmtLabel = (offset: number) => {
-  if (offset === 0) return "GMT+0";
-  return offset > 0 ? `GMT+${offset}` : `GMT${offset}`;
-};
-
-const getUtcTimestamp = (timeStr: string, offset: number) => {
-  try {
-    const parts = timeStr.split(" ");
-    const datePart = parts[0];
-    const timePart = parts[1] || "12:00";
-    const [year, month, day] = datePart.split("-").map(Number);
-    const [hours, minutes] = timePart.split(":").map(Number);
-
-    const date = new Date(year, month - 1, day, hours, minutes);
-    return date.getTime() - offset * 60 * 60 * 1000;
-  } catch (e) {
-    return 0;
-  }
-};
-
-// 搶票動態倒計時輕量化子元件
-function TicketCountdown({
-  saleTimeStr,
-  venueOffset,
-  t,
-}: {
-  saleTimeStr: string;
-  venueOffset: number;
-  t: any;
-}) {
-  const [timeLeft, setTimeLeft] = useState<{
-    days: number;
-    hours: number;
-    minutes: number;
-    seconds: number;
-  } | null>(null);
-  const [isEnded, setIsEnded] = useState(false);
-
-  useEffect(() => {
-    const calculate = () => {
-      const targetUtc = getUtcTimestamp(saleTimeStr, venueOffset);
-      const nowUtc = Date.now();
-      const diff = targetUtc - nowUtc;
-
-      if (diff <= 0) {
-        setIsEnded(true);
-        return;
-      }
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
-      const minutes = Math.floor((diff / (1000 * 60)) % 60);
-      const seconds = Math.floor((diff / 1000) % 60);
-      setTimeLeft({ days, hours, minutes, seconds });
-      setIsEnded(false);
-    };
-
-    calculate();
-    const interval = setInterval(calculate, 1000);
-    return () => clearInterval(interval);
-  }, [saleTimeStr, venueOffset]);
-
-  if (isEnded)
-    return (
-      <span className="text-slate-500 text-[10px]">{t.countdownEnded}</span>
-    );
-  if (!timeLeft) return null;
-
-  const totalHours = timeLeft.days * 24 + timeLeft.hours;
-  const isUrgent = totalHours < 1;
-  const isWarning = totalHours < 24 && totalHours >= 1;
-
-  let styleClass = "text-indigo-400 font-mono text-[11px]";
-  if (isUrgent)
-    styleClass = "text-rose-500 font-bold font-mono text-[11px] animate-pulse";
-  else if (isWarning)
-    styleClass = "text-amber-500 font-medium font-mono text-[11px]";
-
-  return (
-    <span className={styleClass}>
-      {t.countdownPrefix}
-      {timeLeft.days > 0 ? `${timeLeft.days}d ` : ""}
-      {timeLeft.hours.toString().padStart(2, "0")}h:
-      {timeLeft.minutes.toString().padStart(2, "0")}m:
-      {timeLeft.seconds.toString().padStart(2, "0")}s
-    </span>
-  );
 }
 
 export default function Dashboard() {
@@ -290,7 +193,6 @@ export default function Dashboard() {
   > | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const csvInputRef = useRef<HTMLInputElement>(null);
 
   // 初始化載入資料與時區偵測
   useEffect(() => {
@@ -509,6 +411,20 @@ export default function Dashboard() {
     saveAlarmsToStorage(updated);
   };
 
+  // 鍵盤快速鍵 Ctrl+Z 監聽
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        if (previousEvents) {
+          e.preventDefault();
+          triggerUndo();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previousEvents, previousSplits, previousRoles, previousOffsets]);
+
   const saveSplitsToStorage = (
     newSplits: Record<string, { total: number; split: number }>,
     takeSnapshot = true
@@ -581,6 +497,48 @@ export default function Dashboard() {
     setAiNotice("↩️ 已成功復原至上一步！");
   };
 
+  // 全球時區換算
+  const convertToUserLocalTime = (
+    venueTimeStr: string,
+    venueOffset: number
+  ) => {
+    try {
+      const parts = venueTimeStr.split(" ");
+      const datePart = parts[0];
+      const timePart = parts[1] || "12:00";
+
+      const [year, month, day] = datePart.split("-").map(Number);
+      const [hours, minutes] = timePart.split(":").map(Number);
+
+      const date = new Date(year, month - 1, day, hours, minutes);
+      const diffHours = browserOffset - venueOffset;
+      date.setHours(date.getHours() + diffHours);
+
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+        date.getDate()
+      )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    } catch (e) {
+      return "時區計算錯誤";
+    }
+  };
+
+  // 取得 UTC 毫秒戳記
+  const getUtcTimestamp = (timeStr: string, offset: number) => {
+    try {
+      const parts = timeStr.split(" ");
+      const datePart = parts[0];
+      const timePart = parts[1] || "12:00";
+      const [year, month, day] = datePart.split("-").map(Number);
+      const [hours, minutes] = timePart.split(":").map(Number);
+
+      const date = new Date(year, month - 1, day, hours, minutes);
+      return date.getTime() - offset * 60 * 60 * 1000;
+    } catch (e) {
+      return 0;
+    }
+  };
+
   // 【精準防撞時間衝突偵測：重疊 3 小時內】
   const getConflictingEvents = (currentEvent: ShowEvent) => {
     const currentOffset =
@@ -620,117 +578,9 @@ export default function Dashboard() {
     return `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
   };
 
-  // ----------------------------------------------------
-  // 【外掛功能：參戰清單一鍵 Excel/CSV 匯出與疊加匯入】
-  // ----------------------------------------------------
-  const exportChecklistToCsv = () => {
-    const targetEvents = events.filter(
-      (e) =>
-        e.statusLifecycle === "purchased" ||
-        e.statusLifecycle === "applied_drawing" ||
-        e.statusLifecycle === "waiting_list"
-    );
-
-    const headers = [
-      "專案標題",
-      "主要藝人",
-      "演出地點",
-      "演出日期",
-      "售票平台/主辦",
-      "目前生命週期狀態",
-      "原始情報連結",
-    ];
-    const rows = targetEvents.map((e) => [
-      e.title,
-      e.artist,
-      e.location,
-      e.showDate,
-      e.agency,
-      e.statusLifecycle,
-      e.sourceUrl,
-    ]);
-
-    // 內建 Excel 專用 BOM 頭 確保中文不亂碼
-    const csvContent =
-      "\uFEFF" +
-      [
-        headers.join(","),
-        ...rows.map((r) =>
-          r.map((val) => `"${String(val).replace(/"/g, '""')}"`).join(",")
-        ),
-      ].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `Challenger_參戰活動清單_${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportCsvChecklist = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        const lines = text
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
-        if (lines.length <= 1) return;
-
-        const importedNewEvents: ShowEvent[] = [];
-        for (let i = 1; i < lines.length; i++) {
-          const matches =
-            lines[i].match(/(".*?"|[^,\s]+)(?=\s*,|\s*$)/g) ||
-            lines[i].split(",");
-          const cleanFields = matches.map((field) =>
-            field.replace(/^"|"$/g, "").replace(/""/g, '"')
-          );
-
-          if (cleanFields[0]) {
-            importedNewEvents.push({
-              id: `csv-event-${Date.now()}-${i}`,
-              title: cleanFields[0] || "未命名 CSV 活動",
-              artist: cleanFields[1] || "未指定藝人",
-              location: cleanFields[2] || "未指定地點",
-              showDate: cleanFields[3] || "2026-12-31 18:00",
-              agency: cleanFields[4] || "CSV 導入平台",
-              statusLifecycle: (cleanFields[5] as any) || "purchased",
-              sourceUrl: cleanFields[6] || "https://ticketplus.com.tw",
-              userNotes: "【📬 本活動是經由參戰活動清單 CSV 匯入疊加】",
-              type: "official",
-              expenses: [{ item: "預估票費", cost: 0 }],
-              ticketStages: [
-                {
-                  stageName: "售票管制點已同步",
-                  saleTime: cleanFields[3] || "2026-12-31 12:00",
-                  status: "active",
-                },
-              ],
-              fanEvents: [],
-              curatedShops: [],
-            });
-          }
-        }
-
-        if (importedNewEvents.length > 0) {
-          saveEventsToStorage([...importedNewEvents, ...events]);
-          alert(`🎉 成功疊加匯入 ${importedNewEvents.length} 筆參戰活動行程！`);
-        }
-      } catch (err) {
-        alert("❌ 讀取 Excel/CSV 失敗，請確保欄位結構正確。");
-      }
-    };
-    reader.readAsText(file);
+  const formatGmtLabel = (offset: number) => {
+    if (offset === 0) return "GMT+0";
+    return offset > 0 ? `GMT+${offset}` : `GMT${offset}`;
   };
 
   const exportData = () => {
@@ -838,7 +688,15 @@ export default function Dashboard() {
   };
 
   const handleProcessAiInput = (rawInput: string) => {
-    const cleanInput = rawInput.trim();
+    // --- 資安注入：強行過濾任何惡意 Script ---
+    const sanitized = rawInput
+      .replace(/<[^>]*>?/gm, "")
+      .replace(/javascript:/gi, "");
+    if (sanitized !== rawInput) {
+      setAiNotice("⚠️ 已自動偵測並過濾潛在不安全字元。");
+      return;
+    }
+    const cleanInput = sanitized.trim();
     if (!cleanInput) return;
 
     const text = cleanInput.toLowerCase();
@@ -1263,31 +1121,6 @@ export default function Dashboard() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
-          {/* Excel/CSV 參戰清單控制 */}
-          <div className="flex items-center bg-slate-900 border border-purple-900/40 rounded-lg p-0.5 shadow-lg">
-            <button
-              onClick={exportChecklistToCsv}
-              className="flex items-center gap-1 text-[11px] text-purple-300 hover:text-white hover:bg-purple-950/40 px-2 py-1 rounded transition-colors"
-              title="匯出購入與登記的參戰清單 (.csv)"
-            >
-              <FileSpreadsheet size={12} /> 匯出參戰 Excel
-            </button>
-            <input
-              type="file"
-              ref={csvInputRef}
-              onChange={handleImportCsvChecklist}
-              accept=".csv"
-              className="hidden"
-            />
-            <button
-              onClick={() => csvInputRef.current?.click()}
-              className="flex items-center gap-1 text-[11px] text-purple-300 hover:text-white hover:bg-purple-950/40 px-2 py-1 rounded transition-colors border-l border-slate-800"
-              title="疊加匯入朋友的活動清單"
-            >
-              <Upload size={12} /> 匯入參戰 CSV
-            </button>
-          </div>
-
           {/* 語系切換 */}
           <button
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}
@@ -1397,7 +1230,7 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* 全球財務預算卡片 */}
+        {/* 全球財務預算卡片 (在選定幣值情形下，自動調整成同一幣值) */}
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg relative overflow-hidden group">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
@@ -1574,9 +1407,9 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* 雙欄布局 */}
+        {/* 雙欄布局：左側活動卡片列表 / 右側旅遊隨身清單 */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 左側：活動列表 */}
+          {/* 左側：活動列表 (佔用 2 欄) */}
           <div className="lg:col-span-2 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredEvents.map((event) => {
@@ -1591,18 +1424,17 @@ export default function Dashboard() {
                 const conflicts = getConflictingEvents(event);
                 const hasConflict = conflicts.length > 0;
                 const currentRole = eventRoles[event.id] || null;
+
                 const venueOffset =
                   eventOffsets[event.id] !== undefined
                     ? eventOffsets[event.id]
                     : browserOffset;
 
+                // 鬧鐘配置
                 const alarmConfig = alarms[event.id] || {
                   enabled: false,
                   minutesAhead: 30,
                 };
-                const nextSaleStage = event.ticketStages.find(
-                  (s) => s.status !== "ended"
-                );
 
                 return (
                   <div
@@ -1619,6 +1451,7 @@ export default function Dashboard() {
                         setExpandedCard(isExpanded ? null : event.id)
                       }
                     >
+                      {/* 卡片頭部 */}
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-mono tracking-wider">
@@ -1652,6 +1485,7 @@ export default function Dashboard() {
                       </p>
 
                       <div className="bg-slate-950/60 rounded-lg p-2 border border-slate-800/50 space-y-1.5 text-xs">
+                        {/* 雙軌並排展示 */}
                         <div className="space-y-1">
                           <div className="flex justify-between items-center text-purple-300 font-medium">
                             <span className="flex items-center gap-1">
@@ -1680,23 +1514,7 @@ export default function Dashboard() {
                           </div>
                         </div>
 
-                        {/* 售票動態倒計時注入 */}
-                        {nextSaleStage && (
-                          <div className="flex justify-between items-center pt-1 border-t border-slate-950/80">
-                            <span className="text-indigo-300 font-medium flex items-center gap-1">
-                              <Clock size={12} />{" "}
-                              {lang === "zh"
-                                ? "售票倒計時"
-                                : "Ticket Countdown"}
-                            </span>
-                            <TicketCountdown
-                              saleTimeStr={nextSaleStage.saleTime}
-                              venueOffset={venueOffset}
-                              t={t}
-                            />
-                          </div>
-                        )}
-
+                        {/* 金額調整（同一幣值） */}
                         <div className="flex justify-between items-center pt-1 border-t border-slate-950/80 text-amber-400 font-mono">
                           <span>
                             💰 {lang === "zh" ? "預估規費/票面價" : "Est. Cost"}
@@ -1705,6 +1523,7 @@ export default function Dashboard() {
                         </div>
                       </div>
 
+                      {/* 3小時時間防撞警告 */}
                       {hasConflict && (
                         <div className="mt-3 flex items-center gap-1.5 bg-rose-950/30 border border-rose-900/40 text-rose-400 px-2.5 py-1.5 rounded-lg text-[10px]">
                           <AlertTriangle
@@ -1717,6 +1536,7 @@ export default function Dashboard() {
                         </div>
                       )}
 
+                      {/* 一鍵導航 */}
                       <div className="flex items-center justify-between mt-3 text-xs">
                         <div className="flex items-center gap-1 text-slate-400 max-w-[70%]">
                           <MapPin
@@ -1810,6 +1630,8 @@ export default function Dashboard() {
                               height="100%"
                               frameBorder="0"
                               scrolling="no"
+                              marginHeight={0}
+                              marginWidth={0}
                               src={getEmbedMapIframeUrl(event.location)}
                               className="opacity-80 hover:opacity-100 transition-opacity"
                               style={{
@@ -1832,10 +1654,11 @@ export default function Dashboard() {
                               value={venueOffset}
                               onChange={(e) => {
                                 const newOffset = parseInt(e.target.value);
-                                saveOffsetsToStorage({
+                                const updatedOffsets = {
                                   ...eventOffsets,
                                   [event.id]: newOffset,
-                                });
+                                };
+                                saveOffsetsToStorage(updatedOffsets);
                               }}
                               className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-300 font-mono focus:outline-none"
                             >
@@ -1855,7 +1678,7 @@ export default function Dashboard() {
                           </div>
                         </div>
 
-                        {/* 同日行程 3 小時防撞 */}
+                        {/* 同日行程 3 小時防撞調配 */}
                         {hasConflict && (
                           <div className="bg-slate-900 border border-slate-800/80 rounded-lg p-3">
                             <p className="font-semibold text-[11px] text-rose-400 flex items-center gap-1">
@@ -1878,17 +1701,18 @@ export default function Dashboard() {
                                 }}
                                 className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-amber-950/40 border-amber-500 text-amber-400"
                               >
-                                <Star size={10} className="fill-amber-400" />{" "}
+                                <Star size={10} className="fill-amber-400" />
                                 {lang === "zh"
                                   ? "設為此時段主案"
                                   : "Set Primary"}
                               </button>
                               <button
                                 onClick={() => {
-                                  saveRolesToStorage({
+                                  const newRoles = {
                                     ...eventRoles,
                                     [event.id]: "backup" as const,
-                                  });
+                                  };
+                                  saveRolesToStorage(newRoles);
                                 }}
                                 className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-slate-900 border-slate-800 text-slate-400"
                               >
@@ -1919,9 +1743,9 @@ export default function Dashboard() {
                               href={getGoogleCalendarLink(
                                 event.title,
                                 event.showDate,
-                                `舉辦地時區: ${formatGmtLabel(
+                                `[時區資訊] 舉辦地時區: ${formatGmtLabel(
                                   venueOffset
-                                )}\n\n情報連結: ${event.sourceUrl}`
+                                )}\n\n原始網址情報源: ${event.sourceUrl}`
                               )}
                               target="_blank"
                               rel="noopener noreferrer"
@@ -1940,7 +1764,7 @@ export default function Dashboard() {
                           <span className="font-medium text-slate-400">
                             {lang === "zh"
                               ? "變更活動狀態流程："
-                              : "Change Stage:"}
+                              : "Change Lifecycle Stage:"}
                           </span>
                           <select
                             value={event.statusLifecycle}
@@ -1977,7 +1801,7 @@ export default function Dashboard() {
                               handleNotesChange(event.id, e.target.value)
                             }
                             placeholder="輸入私人備忘，系統會自動儲存..."
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none h-14 resize-none"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-14 resize-none"
                           />
                         </div>
                       </div>
@@ -2017,13 +1841,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* 右側：旅遊提醒清單 */}
+          {/* 右側：精緻旅遊提醒清單 Checklist (佔用 1 欄) */}
           <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 shadow-xl flex flex-col h-fit">
             <h3 className="font-semibold text-sm text-slate-200 flex items-center gap-2 border-b border-slate-800 pb-2.5 mb-3">
               <CheckSquare size={16} className="text-purple-400" />{" "}
               {t.checklistTitle}
             </h3>
 
+            {/* 新增項目輸入框 */}
             <div className="flex gap-1.5 mb-4">
               <input
                 type="text"
@@ -2041,6 +1866,7 @@ export default function Dashboard() {
               </button>
             </div>
 
+            {/* 清單項目列表 */}
             {checklist.length === 0 ? (
               <p className="text-xs text-slate-600 text-center py-6">
                 {t.noChecklist}
@@ -2086,6 +1912,7 @@ export default function Dashboard() {
                       </button>
                     </div>
 
+                    {/* 自訂隨手欄位備註 */}
                     <input
                       type="text"
                       value={item.notes}
@@ -2093,7 +1920,7 @@ export default function Dashboard() {
                         updateChecklistNotes(item.id, e.target.value)
                       }
                       placeholder={t.memoPlaceholder}
-                      className="w-full bg-slate-900 border border-slate-800/60 rounded px-2 py-1 text-[10px] text-slate-400 placeholder:text-slate-600 focus:outline-none font-sans"
+                      className="w-full bg-slate-900 border border-slate-800/60 rounded px-2 py-1 text-[10px] text-slate-400 placeholder:text-slate-600 focus:outline-none focus:border-indigo-600 font-sans"
                     />
                   </div>
                 ))}
