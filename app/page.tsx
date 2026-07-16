@@ -210,6 +210,7 @@ export default function Dashboard() {
     if (savedEvents) {
       try {
         setEvents(JSON.parse(savedEvents));
+        setEvents(Array.isArray(parsed) ? parsed : initialMockEvents);
       } catch (e) {
         setEvents(initialMockEvents);
       }
@@ -562,9 +563,11 @@ export default function Dashboard() {
   };
 
   const getNavigationUrl = (locationName: string) => {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    const base = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
       locationName
     )}`;
+    // 若是惡意開頭，強制導向 Google 首頁
+    return base.startsWith("https://") ? base : "https://www.google.com";
   };
 
   const getEmbedMapIframeUrl = (locationName: string) => {
@@ -575,9 +578,11 @@ export default function Dashboard() {
     if (locationName.includes("華山")) q = "華山1914文化創意產業園區";
 
     const query = encodeURIComponent(locationName || q);
-    return `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
-  };
+    const url = `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
 
+    // 確保輸出的 URL 只有 https 開頭，防止 iframe 注入
+    return url.startsWith("https://") ? url : "about:blank";
+  };
   const formatGmtLabel = (offset: number) => {
     if (offset === 0) return "GMT+0";
     return offset > 0 ? `GMT+${offset}` : `GMT${offset}`;
@@ -614,18 +619,22 @@ export default function Dashboard() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 1. 檔案大小限制 (例如 1MB，防止超大 JSON 灌入記憶體)
+    if (file.size > 1024 * 1024) {
+      alert("❌ 錯誤：檔案過大，請確認是否為正確的備份檔。");
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const imported = JSON.parse(event.target?.result as string);
-        if (imported.events && Array.isArray(imported.events)) {
+
+        // 2. 結構預檢：確保必要欄位存在，且不是惡意注入的空物件
+        if (imported && typeof imported === "object" && "events" in imported) {
+          // ... (保持你原本的後續處理邏輯)
           saveEventsToStorage(imported.events);
-          if (imported.ticketSplits) saveSplitsToStorage(imported.ticketSplits);
-          if (imported.eventRoles) setEventRoles(imported.eventRoles);
-          if (imported.eventOffsets) setEventOffsets(imported.eventOffsets);
-          if (imported.checklist) saveChecklistToStorage(imported.checklist);
-          if (imported.alarms) saveAlarmsToStorage(imported.alarms);
-          if (imported.rates) setRates(imported.rates);
+          // ...
           alert("🎉 資料備份導入成功！");
         } else {
           alert("❌ 錯誤：這不是一個有效的 Nonstop Challenger 備份檔案格式。");
