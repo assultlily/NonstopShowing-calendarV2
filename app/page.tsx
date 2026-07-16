@@ -1176,10 +1176,44 @@ export default function Dashboard() {
           </div>
 
           <button
-            onClick={handleResetData}
-            className="text-[11px] text-slate-500 hover:text-rose-400 transition-colors border border-slate-800 hover:border-rose-900/40 px-2 py-1.5 rounded-lg bg-slate-900/30"
+            onClick={() => {
+              // 獨立作用域，不影響組件其他狀態
+              const targetEvents = events.filter(
+                (e) =>
+                  e.statusLifecycle === "purchased" ||
+                  e.statusLifecycle === "applied_drawing"
+              );
+              const headers = ["專案", "藝人", "地點", "日期", "主辦", "狀態"];
+              const rows = targetEvents.map((e) => [
+                String(e.title || "").replace(/[=+\-@,]/g, ""),
+                String(e.artist || "").replace(/[=+\-@,]/g, ""),
+                String(e.location || "").replace(/[=+\-@,]/g, ""),
+                e.showDate || "",
+                e.agency || "",
+                e.statusLifecycle || "",
+              ]);
+
+              // 產生 CSV 字串 (加入 BOM 確保 Excel 開啟不亂碼)
+              const csvContent =
+                "\uFEFF" +
+                [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+              const blob = new Blob([csvContent], {
+                type: "text/csv;charset=utf-8;",
+              });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `參戰清單_${
+                new Date().toISOString().split("T")[0]
+              }.csv`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-1 text-[11px] text-emerald-300 hover:text-white hover:bg-emerald-900/30 border border-emerald-900/50 px-2 py-1.5 rounded-lg transition-all"
+            title="匯出已確認或登記中的參戰清單至 Excel"
           >
-            🔄 {t.reset}
+            <FileText size={12} />{" "}
+            {lang === "zh" ? "匯出 Excel" : "Export Excel"}
           </button>
 
           <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex">
