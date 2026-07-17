@@ -15,14 +15,14 @@ import {
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
-import { LangType, TRANSLATIONS } from "./translations";
+import { LangType, TRANSLATIONS } from "../lib/translations";
 import {
   getNavigationUrl,
   getEmbedMapIframeUrl,
   formatGmtLabel,
   getGoogleCalendarLink,
   STATUS_BADGES,
-} from "./helpers";
+} from "../lib/helpers";
 
 interface EventCardProps {
   event: ShowEvent;
