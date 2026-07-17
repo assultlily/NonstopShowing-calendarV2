@@ -590,6 +590,7 @@ export default function Dashboard() {
     ticketSplits,
     setTicketSplits,
     eventOffsets,
+    setEventOffsets,
     canUndo: history.length > 0,
     pushHistory,
     setReleasedAmount,
@@ -1198,10 +1199,10 @@ export default function Dashboard() {
               {filteredEvents.map((event) => {
                 const conflicts = getConflictingEvents(event);
                 const currentRole = eventRoles[event.id] || null;
-                const venueOffset =
-                  eventOffsets[event.id] !== undefined
-                    ? eventOffsets[event.id]
-                    : browserOffset;
+                const isOffsetConfirmed = eventOffsets[event.id] !== undefined;
+                const venueOffset = isOffsetConfirmed
+                  ? eventOffsets[event.id]
+                  : browserOffset;
                 const alarmConfig = alarms[event.id] || {
                   enabled: false,
                   minutesAhead: 30,
@@ -1227,6 +1228,7 @@ export default function Dashboard() {
                     currentRole={currentRole}
                     conflicts={conflicts}
                     venueOffset={venueOffset}
+                    isOffsetConfirmed={isOffsetConfirmed}
                     browserOffset={browserOffset}
                     availableOffsets={availableOffsets}
                     alarmConfig={alarmConfig}
