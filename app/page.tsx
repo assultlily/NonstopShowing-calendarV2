@@ -11,10 +11,11 @@ import { ChecklistItem, AlarmConfig } from "./types";
 import {
   getUtcTimestamp,
   formatGmtLabel,
-  identifyTicketPlatform,
   STATUS_BADGES,
 } from "./lib/helpers";
 import EventCard from "./components/EventCard";
+import AiInputBar from "./components/AiInputBar";
+import { useAiInputProcessor } from "./hooks/useAiInputProcessor";
 import {
   Calendar,
   List,
@@ -22,7 +23,6 @@ import {
   Layers,
   DollarSign,
   FileText,
-  Sparkles,
   TrendingUp,
   Download,
   Upload,
@@ -96,7 +96,6 @@ export default function Dashboard() {
 
   // 核心資料狀態
   const [events, setEvents] = useState<ShowEvent[]>([]);
-  const [aiInput, setAiInput] = useState<string>("");
   const [aiNotice, setAiNotice] = useState<string>("");
 
   // 分票與主備案狀態
@@ -561,268 +560,26 @@ export default function Dashboard() {
     reader.readAsText(file);
   };
 
-  const handleProcessAiInput = (rawInput: string) => {
-    // --- 資安注入：強行過濾任何惡意 Script ---
-    const sanitized = rawInput
-      .replace(/<[^>]*>?/gm, "")
-      .replace(/javascript:/gi, "");
-    if (sanitized !== rawInput) {
-      setAiNotice("⚠️ 已自動偵測並過濾潛在不安全字元。");
-      return;
-    }
-    const cleanInput = sanitized.trim();
-    if (!cleanInput) return;
-
-    const text = cleanInput.toLowerCase();
-    let updatedEvents = [...events];
-    const noticeMessages: string[] = [];
-
-    // 網址智慧辨識建卡系統
-    // 允許使用者貼上沒有 http(s):// 開頭的網址（例如從分享功能複製出來的網址常常會被拿掉協議）
-    const looksLikeUrl =
-      text.startsWith("http://") ||
-      text.startsWith("https://") ||
-      /^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(cleanInput.split(/\s+/)[0]);
-
-    if (looksLikeUrl) {
-      // 若使用者沒帶協議，統一補上 https:// 以確保後續連結可正常開啟、平台比對邏輯一致
-      const normalizedUrl = /^https?:\/\//i.test(cleanInput)
-        ? cleanInput
-        : `https://${cleanInput}`;
-
-      const match = identifyTicketPlatform(normalizedUrl);
-      const agencyGuess = match ? match.platform : "外部網站連結專案";
-      const isKnownPlatform = !!match;
-
-      const urlParts = cleanInput.split("/");
-      let guessedTitle =
-        urlParts[urlParts.length - 1] ||
-        urlParts[urlParts.length - 2] ||
-        "未命名網址匯入活動";
-      if (guessedTitle.length > 25)
-        guessedTitle = guessedTitle.substring(0, 22) + "...";
-      guessedTitle = `🌐 網址：${guessedTitle.toUpperCase()}`;
-
-      const fallbackNotes = isKnownPlatform
-        ? `【📬 網址自動化偵測建立】\n本活動是由您直接貼上外部連結智慧生成的基底卡片！\n原始網址：${cleanInput}\n\n請展開本卡片，自由修改隨手備忘、設定時區、或手動更動確切的演出時間。`
-        : `【📬 通用網址匯入（未辨識售票平台）】\n系統無法確認此網址所屬的購票平台，已為您建立通用連結專案。\n原始網址：${cleanInput}\n\n請展開此卡片手動微調會場名稱、更正售票平台名稱或時區設定。`;
-
-      const newUrlEvent: ShowEvent = {
-        id: `url-event-${Date.now()}`,
-        title: guessedTitle,
-        artist: "隨網址自動辨識建構",
-        type: "official",
-        location:
-          text.includes("eplus") ||
-          text.includes("pia.jp") ||
-          text.includes("confetti")
-            ? "日本現地會場"
-            : "未指定地點 (請展開本卡片手動微調)",
-        showDate: "2026-12-31 19:00",
-        agency: agencyGuess,
-        sourceUrl: normalizedUrl,
-        statusLifecycle: "watchlist",
-        userNotes: fallbackNotes,
-        expenses: [{ item: "預估票規費項目", cost: 0 }],
-        ticketStages: [
-          {
-            stageName: "網址情報源已鎖定",
-            saleTime: "即日起",
-            status: "active",
-          },
-          {
-            stageName: "使用者自訂管制點",
-            saleTime: "2026-12-31 12:00",
-            status: "active",
-          },
-        ],
-        fanEvents: [],
-        curatedShops: [],
-      };
-
-      setPreviousEvents([...events]);
-      setPreviousSplits({ ...ticketSplits });
-      setPreviousOffsets({ ...eventOffsets });
-
-      const oldEventsSnapshot = events;
-      const finalEvents = [newUrlEvent, ...events];
-      setEvents(finalEvents);
-      syncEvents(finalEvents, oldEventsSnapshot).catch((err) => {
-        console.error("同步雲端失敗：", err);
-        setAiNotice("⚠️ 卡片已建立在畫面上，但同步到雲端失敗，請檢查網路連線。");
-      });
-
-      setAiNotice(
-        isKnownPlatform
-          ? `🎉 [網址自動辨識成功]：\n系統已自動為此連結【${agencyGuess}】建構專屬專案卡片！`
-          : `ℹ️ [通用網址已匯入]：\n已為您建置連結專案，請手動更新售票平台與時區！`
-      );
-      setAiInput("");
-      return;
-    }
-
-    // 復原指令
-    if (text === "復原" || text === "上一步" || text === "undo") {
-      if (previousEvents) {
-        triggerUndo();
-        setAiInput("");
-      } else {
-        setAiNotice("⚠️ 目前沒有更早的歷史紀錄可以復原。");
-        setAiInput("");
-      }
-      return;
-    }
-
-    // 新增活動指令
-    if (
-      text.startsWith("新建:") ||
-      text.startsWith("新建：") ||
-      text.startsWith("add:")
-    ) {
-      const cleanText = cleanInput.substring(3).trim();
-      const parts = cleanText.split(/[,，]/);
-
-      if (parts.length >= 1 && parts[0].trim() !== "") {
-        const title = parts[0].trim();
-        const artist = parts[1] ? parts[1].trim() : "未指定藝人/主辦";
-        const showDate = parts[2] ? parts[2].trim() : "2026-12-31 18:00";
-        const location = parts[3] ? parts[3].trim() : "未指定地點";
-
-        const newEvent: ShowEvent = {
-          id: `dynamic-event-${Date.now()}`,
-          title: title,
-          artist: artist,
-          type:
-            title.includes("研討會") || title.includes("講座")
-              ? "seminar"
-              : "official",
-          location: location,
-          showDate: showDate,
-          agency: "AI 動態生成專案",
-          sourceUrl: "https://ticketplus.com.tw",
-          statusLifecycle: "applied_drawing",
-          userNotes: "此活動為打字動態自動生成。可自由輸入修改備忘錄。",
-          expenses: [{ item: "預估票面費", cost: 3600 }],
-          ticketStages: [
-            { stageName: "系統開放登記", saleTime: "即日起", status: "ended" },
-            {
-              stageName: "抽選公佈與付費",
-              saleTime: `${showDate.split(" ")[0]} 12:00`,
-              status: "drawing",
-            },
-          ],
-          fanEvents: [],
-          curatedShops: [],
-        };
-
-        setPreviousEvents([...events]);
-        setPreviousSplits({ ...ticketSplits });
-        setPreviousOffsets({ ...eventOffsets });
-
-        const oldEventsSnapshot = events;
-        const finalEvents = [newEvent, ...events];
-        setEvents(finalEvents);
-        syncEvents(finalEvents, oldEventsSnapshot).catch((err) => {
-          console.error("同步雲端失敗：", err);
-          setAiNotice("⚠️ 卡片已建立在畫面上，但同步到雲端失敗，請檢查網路連線。");
-        });
-
-        const updatedSplits = {
-          ...ticketSplits,
-          [newEvent.id]: { total: 1, split: 0 },
-        };
-        setTicketSplits(updatedSplits);
-        localStorage.setItem(
-          "nonstop_challenger_splits",
-          JSON.stringify(updatedSplits)
-        );
-
-        setAiNotice(`✨ [AI 動態建構成功]：\n已成功新增【${title}】！`);
-        setAiInput("");
-        return;
-      }
-    }
-
-    // 智慧語意狀態更新系統
-    const isNegative =
-      text.includes("沒") ||
-      text.includes("無") ||
-      text.includes("不") ||
-      text.includes("未") ||
-      text.includes("敗") ||
-      text.includes("落選");
-
-    if (text.includes("優里") || text.includes("yuuri")) {
-      if (
-        (text.includes("中選") ||
-          text.includes("買到") ||
-          text.includes("中票")) &&
-        !isNegative
-      ) {
-        updatedEvents = updatedEvents.map((event) =>
-          event.id === "event-yuuri-004"
-            ? { ...event, statusLifecycle: "purchased" }
-            : event
-        );
-        noticeMessages.push(
-          "🎟️ 已將【優里】狀態更新為【購入完成】！資金已從預備金正式扣減。"
-        );
-      } else if (
-        isNegative &&
-        (text.includes("沒") ||
-          text.includes("落選") ||
-          text.includes("未中選"))
-      ) {
-        const targetEvent = events.find((e) => e.id === "event-yuuri-004");
-        if (
-          targetEvent &&
-          (targetEvent.statusLifecycle === "applied_drawing" ||
-            targetEvent.statusLifecycle === "waiting_list")
-        ) {
-          const cost = targetEvent.expenses.reduce(
-            (sum, exp) => sum + exp.cost,
-            0
-          );
-          setReleasedAmount(cost);
-          setTimeout(() => setReleasedAmount(null), 5000);
-        }
-
-        updatedEvents = updatedEvents.map((event) =>
-          event.id === "event-yuuri-004"
-            ? { ...event, statusLifecycle: "ended_no_ticket" }
-            : event
-        );
-        noticeMessages.push("😢 偵測到優里落選，已設為【遺憾落選】。");
-      }
-    }
-
-    if (noticeMessages.length > 0) {
-      setPreviousEvents([...events]);
-      setPreviousSplits({ ...ticketSplits });
-      setPreviousOffsets({ ...eventOffsets });
-
-      const oldEventsSnapshot = events;
-      setEvents(updatedEvents);
-      syncEvents(updatedEvents, oldEventsSnapshot).catch((err) => {
-        console.error("同步雲端失敗：", err);
-        setAiNotice("⚠️ 狀態已更新在畫面上，但同步到雲端失敗，請檢查網路連線。");
-      });
-      setAiNotice(`⚡ AI 語意分析連動成功：\n${noticeMessages.join("\n")}`);
-      setAiInput("");
-    } else {
-      setAiNotice(
-        `💡 系統已收到您的感測指令：\n"${cleanInput}"\n※ 貼上售票網址、或使用「新建:」公式，按下 Enter 即可自動建構！`
-      );
-      setAiInput("");
-    }
-  };
-
-  const handleKeyDownInput = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleProcessAiInput(aiInput);
-    }
-  };
+  const {
+    aiInput,
+    setAiInput,
+    isProcessing: isAiProcessing,
+    handleProcessAiInput,
+    handleKeyDownInput,
+  } = useAiInputProcessor({
+    events,
+    setEvents,
+    ticketSplits,
+    setTicketSplits,
+    eventOffsets,
+    previousEvents,
+    setPreviousEvents,
+    setPreviousSplits,
+    setPreviousOffsets,
+    setReleasedAmount,
+    triggerUndo,
+    setAiNotice,
+  });
 
   const handleStatusChange = (
     id: string,
@@ -1284,59 +1041,17 @@ export default function Dashboard() {
         </section>
 
         {/* 語意感測入口 */}
-        <section className="bg-slate-900 rounded-xl border border-slate-800 p-4 shadow-xl">
-          <div className="flex items-center justify-between mb-3 text-purple-400 font-medium text-sm">
-            <span className="flex items-center gap-2">
-              <Sparkles size={16} />{" "}
-              {lang === "zh"
-                ? "語意動態感測與卡片建構入口"
-                : "Semantic Intelligence Entry"}
-            </span>
-            <span className="text-[10px] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded text-emerald-400 font-medium">
-              💡{" "}
-              {lang === "zh"
-                ? "直接在下方貼上網址並按 Enter！"
-                : "Directly paste ticketing link and press Enter!"}
-            </span>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <textarea
-              value={aiInput}
-              onChange={(e) => setAiInput(e.target.value)}
-              onKeyDown={handleKeyDownInput}
-              placeholder={
-                lang === "zh"
-                  ? "在此貼上任何售票網址（如 拓元/KKTIX/OPENTIX/eplus/pia 等）或輸入指令，完成後按 Enter！"
-                  : "Paste ticketing links (tixCraft/KKTIX/OPENTIX/eplus/pia) or command, then press Enter!"
-              }
-              className="flex-grow bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-16 resize-none"
-            />
-            <button
-              onClick={() => handleProcessAiInput(aiInput)}
-              className="bg-purple-600 hover:bg-purple-500 border border-purple-500 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all shadow-md active:scale-95 flex items-center justify-center flex-shrink-0"
-            >
-              ⚡ {lang === "zh" ? "智慧感測" : "Analyze"}
-            </button>
-          </div>
-
-          {aiNotice && (
-            <div className="mt-2 text-xs bg-slate-950 border border-slate-800 p-2.5 rounded-lg flex justify-between items-center animate-fadeIn">
-              <span className="text-emerald-400 font-medium whitespace-pre-line leading-relaxed">
-                {aiNotice}
-              </span>
-              {previousEvents && (
-                <button
-                  onClick={triggerUndo}
-                  className="flex items-center gap-1.5 bg-purple-900/40 hover:bg-purple-800 border border-purple-700 hover:border-purple-600 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-purple-200 transition-all shadow-md active:scale-95 flex-shrink-0"
-                >
-                  <RotateCcw size={12} /> ↩️{" "}
-                  {lang === "zh" ? "撤銷 (Ctrl+Z)" : "Undo (Ctrl+Z)"}
-                </button>
-              )}
-            </div>
-          )}
-        </section>
+        <AiInputBar
+          lang={lang}
+          aiInput={aiInput}
+          setAiInput={setAiInput}
+          aiNotice={aiNotice}
+          isProcessing={isAiProcessing}
+          previousEvents={previousEvents}
+          onProcess={handleProcessAiInput}
+          onKeyDown={handleKeyDownInput}
+          onUndo={triggerUndo}
+        />
 
         {/* 搜尋與過濾 */}
         <section className="space-y-3">
