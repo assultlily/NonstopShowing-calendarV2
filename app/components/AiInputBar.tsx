@@ -1,6 +1,5 @@
 import { Sparkles, RotateCcw } from "lucide-react";
 import { LangType } from "../lib/translations";
-import { ShowEvent } from "../mockEvents";
 
 interface AiInputBarProps {
   lang: LangType;
@@ -8,7 +7,7 @@ interface AiInputBarProps {
   setAiInput: (value: string) => void;
   aiNotice: string;
   isProcessing: boolean;
-  previousEvents: ShowEvent[] | null;
+  canUndo: boolean;
   onProcess: (input: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onUndo: () => void;
@@ -20,7 +19,7 @@ export default function AiInputBar({
   setAiInput,
   aiNotice,
   isProcessing,
-  previousEvents,
+  canUndo,
   onProcess,
   onKeyDown,
   onUndo,
@@ -47,12 +46,13 @@ export default function AiInputBar({
           value={aiInput}
           onChange={(e) => setAiInput(e.target.value)}
           onKeyDown={onKeyDown}
+          disabled={isProcessing}
           placeholder={
             lang === "zh"
               ? "在此貼上任何售票網址（如 拓元/KKTIX/OPENTIX/eplus/pia 等）或輸入指令，完成後按 Enter！"
               : "Paste ticketing links (tixCraft/KKTIX/OPENTIX/eplus/pia) or command, then press Enter!"
           }
-          className="flex-grow bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-16 resize-none"
+          className="flex-grow bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-16 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <button
           onClick={() => onProcess(aiInput)}
@@ -72,7 +72,7 @@ export default function AiInputBar({
           <span className="text-emerald-400 font-medium whitespace-pre-line leading-relaxed">
             {aiNotice}
           </span>
-          {previousEvents && (
+          {canUndo && (
             <button
               onClick={onUndo}
               className="flex items-center gap-1.5 bg-purple-900/40 hover:bg-purple-800 border border-purple-700 hover:border-purple-600 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-purple-200 transition-all shadow-md active:scale-95 flex-shrink-0"

@@ -41,6 +41,7 @@ interface EventCardProps {
   currentRole: "primary" | "backup" | null;
   conflicts: ShowEvent[];
   venueOffset: number;
+  isOffsetConfirmed: boolean;
   browserOffset: number;
   availableOffsets: number[];
   alarmConfig: AlarmConfig;
@@ -72,6 +73,7 @@ export default function EventCard({
   currentRole,
   conflicts,
   venueOffset,
+  isOffsetConfirmed,
   browserOffset,
   availableOffsets,
   alarmConfig,
@@ -172,6 +174,17 @@ export default function EventCard({
             <div className="flex justify-between items-center text-purple-300 font-medium">
               <span className="flex items-center gap-1">
                 🏟️ {lang === "zh" ? "舉辦地時間" : "Venue Time"}
+                {!isOffsetConfirmed && (
+                  <AlertTriangle
+                    size={11}
+                    className="text-amber-400"
+                    title={
+                      lang === "zh"
+                        ? "尚未確認場館時區，目前顯示的是您自己所在的時區，請手動確認"
+                        : "Venue timezone not confirmed — showing your own timezone as a fallback"
+                    }
+                  />
+                )}
               </span>
               {isEditingDate ? (
                 <span
