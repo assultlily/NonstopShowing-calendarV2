@@ -123,6 +123,20 @@ export const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   },
 };
 
+// 把 "YYYY-MM-DD HH:mm" 轉成 <input type="datetime-local"> 需要的 "YYYY-MM-DDTHH:mm"
+export function showDateToInputValue(showDate: string): string {
+  const parts = showDate.split(" ");
+  const datePart = parts[0] || "";
+  const timePart = parts[1] || "12:00";
+  return `${datePart}T${timePart}`;
+}
+
+// 把 <input type="datetime-local"> 的值轉回原本使用的 "YYYY-MM-DD HH:mm" 格式
+export function inputValueToShowDate(inputValue: string): string {
+  const [datePart, timePart] = inputValue.split("T");
+  return `${datePart} ${timePart || "12:00"}`;
+}
+
 export function getGoogleCalendarLink(
   title: string,
   dateStr: string,
