@@ -137,6 +137,21 @@ export function inputValueToShowDate(inputValue: string): string {
   return `${datePart} ${timePart || "12:00"}`;
 }
 
+// 嘗試從一段文字裡找出日期（常見格式：2026-12-31、2026/12/31、2026年12月31日）
+// 找得到就一併嘗試抓時間（HH:mm），找不到時間就給預設的晚上7點
+export function extractDateFromText(text: string): string | null {
+  const dateMatch = text.match(/(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})日?/);
+  if (!dateMatch) return null;
+
+  const [, year, month, day] = dateMatch;
+  const pad = (n: string) => n.padStart(2, "0");
+
+  const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+  const time = timeMatch ? `${pad(timeMatch[1])}:${timeMatch[2]}` : "19:00";
+
+  return `${year}-${pad(month)}-${pad(day)} ${time}`;
+}
+
 export function getGoogleCalendarLink(
   title: string,
   dateStr: string,
