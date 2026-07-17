@@ -447,6 +447,7 @@ export default function EventCard({
 
               <div className="flex gap-2 mt-2">
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onSetPrimary(
@@ -454,22 +455,52 @@ export default function EventCard({
                       conflicts.map((c) => c.id)
                     );
                   }}
-                  className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-amber-950/40 border-amber-500 text-amber-400"
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded text-[10px] font-semibold border transition-all active:scale-95 ${
+                    currentRole === "primary"
+                      ? "bg-amber-500 border-amber-400 text-slate-950"
+                      : "bg-amber-950/40 border-amber-500 text-amber-400 hover:bg-amber-900/40"
+                  }`}
                 >
-                  <Star size={10} className="fill-amber-400" />
+                  <Star
+                    size={10}
+                    className={
+                      currentRole === "primary"
+                        ? "fill-slate-950"
+                        : "fill-amber-400"
+                    }
+                  />
                   {lang === "zh" ? "設為此時段主案" : "Set Primary"}
                 </button>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     onSetBackup(event.id);
                   }}
-                  className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-slate-900 border-slate-800 text-slate-400"
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded text-[10px] font-semibold border transition-all active:scale-95 ${
+                    currentRole === "backup"
+                      ? "bg-slate-500 border-slate-300 text-slate-950"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800"
+                  }`}
                 >
                   <Shield size={10} />{" "}
                   {lang === "zh" ? "設為備案" : "Set Backup"}
                 </button>
               </div>
+              <p className="text-[9px] text-slate-500 mt-1.5">
+                {lang === "zh" ? "目前狀態：" : "Current: "}
+                {currentRole === "primary"
+                  ? lang === "zh"
+                    ? "此時段主案"
+                    : "Primary"
+                  : currentRole === "backup"
+                  ? lang === "zh"
+                    ? "備案"
+                    : "Backup"
+                  : lang === "zh"
+                  ? "尚未設定"
+                  : "Not set"}
+              </p>
             </div>
           )}
 
