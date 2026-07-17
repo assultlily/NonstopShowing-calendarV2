@@ -96,6 +96,7 @@ export function useAiInputProcessor({
       let realDescription: string | null = null;
       let structuredDate: string | null = null;
       let fetchFailed = false;
+      let fetchErrorMessage = "";
 
       try {
         const parsed = await parseUrlContent(normalizedUrl);
@@ -105,6 +106,8 @@ export function useAiInputProcessor({
       } catch (err) {
         console.error("讀取網址內容失敗：", err);
         fetchFailed = true;
+        fetchErrorMessage =
+          err instanceof Error ? err.message : "讀取網頁內容失敗";
       }
 
       // 有抓到真實標題就優先使用，抓不到才退回用網址路徑猜
@@ -131,7 +134,7 @@ export function useAiInputProcessor({
       const showDate = extractedDate || "2026-12-31 19:00";
 
       const statusNote = fetchFailed
-        ? "⚠️ 讀取網頁內容失敗（可能是網路問題或該網站不允許存取），已建立基本卡片，請手動補齊資訊。"
+        ? `⚠️ ${fetchErrorMessage}，已建立基本卡片，請手動補齊資訊。`
         : structuredDate
         ? "✅ 已從網頁的活動資訊中精確抓到日期，請展開卡片確認是否正確。"
         : textGuessedDate
@@ -184,7 +187,7 @@ export function useAiInputProcessor({
 
       setAiNotice(
         fetchFailed
-          ? `⚠️ [網址已匯入，但讀取失敗]：\n已建立基本卡片，請手動補上正確資訊。`
+          ? `⚠️ [網址已匯入，但讀取失敗]：\n${fetchErrorMessage}\n已建立基本卡片，請手動補上正確資訊。`
           : isKnownPlatform
           ? `🎉 [網址自動辨識成功]：\n系統已為此連結【${agencyGuess}】建構專屬卡片！\n標題${
               realTitle ? "已自動抓取" : "未抓到，請手動確認"
