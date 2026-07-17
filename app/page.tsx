@@ -5,6 +5,7 @@ import type { User } from "@supabase/supabase-js";
 import { mockEvents as initialMockEvents, ShowEvent } from "./mockEvents";
 import { supabase } from "./lib/supabaseClient";
 import { fetchEvents, syncEvents } from "./lib/eventsApi";
+import { fetchUserSettings, syncUserSettings } from "./lib/settingsApi";
 import { sendLoginLink, signOut } from "./lib/authApi";
 import { TRANSLATIONS, LangType } from "./lib/translations";
 import { ChecklistItem, AlarmConfig } from "./types";
@@ -170,77 +171,54 @@ export default function Dashboard() {
       });
   }, [user]);
 
-  // 初始化載入資料與時區偵測（events 已改由上方 Supabase 讀取，這裡只處理仍留在本機的其他設定）
+  // 登入後從 Supabase 讀取這位使用者的其他設定（清單、鬧鐘、分票、時區、主案備案）
+  useEffect(() => {
+    if (!user) return;
+    fetchUserSettings()
+      .then((settings) => {
+        setTicketSplits(
+          Object.keys(settings.ticketSplits).length > 0
+            ? settings.ticketSplits
+            : { "event-yuuri-004": { total: 4, split: 2 } }
+        );
+        setEventRoles(settings.eventRoles);
+        setEventOffsets(
+          Object.keys(settings.eventOffsets).length > 0
+            ? settings.eventOffsets
+            : { "event-yuuri-004": 9, "event-fujii-kaze-002": 8 }
+        );
+        setChecklist(
+          settings.checklist.length > 0
+            ? settings.checklist
+            : [
+                {
+                  id: "1",
+                  text: "確認護照效期大於 6 個月",
+                  completed: false,
+                  notes: "抽屜第二格",
+                },
+                {
+                  id: "2",
+                  text: "開通海外信用卡刷卡與海外提款",
+                  completed: false,
+                  notes: "主刷中信/備用富邦",
+                },
+              ]
+        );
+        setAlarms(settings.alarms);
+      })
+      .catch((err) => {
+        console.error("讀取雲端設定失敗：", err);
+        setAiNotice("⚠️ 讀取雲端設定失敗，請檢查網路連線後重新整理頁面。");
+      });
+  }, [user]);
+
+  // 初始化載入資料與時區偵測（events、splits、roles、offsets、checklist、alarms 已改由 Supabase 讀取，這裡只處理匯率偏好設定）
   useEffect(() => {
     const localOffset = -new Date().getTimezoneOffset() / 60;
     setBrowserOffset(localOffset);
 
-    const savedSplits = localStorage.getItem("nonstop_challenger_splits");
-    const savedRoles = localStorage.getItem("nonstop_challenger_roles");
-    const savedOffsets = localStorage.getItem("nonstop_challenger_offsets");
-    const savedChecklist = localStorage.getItem("nonstop_challenger_checklist");
-    const savedAlarms = localStorage.getItem("nonstop_challenger_alarms");
     const savedRates = localStorage.getItem("nonstop_challenger_rates");
-
-    if (savedSplits) {
-      try {
-        setTicketSplits(JSON.parse(savedSplits));
-      } catch (e) {
-        setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } });
-      }
-    } else {
-      setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } });
-    }
-
-    if (savedRoles) {
-      try {
-        setEventRoles(JSON.parse(savedRoles));
-      } catch (e) {
-        setEventRoles({});
-      }
-    }
-
-    if (savedOffsets) {
-      try {
-        setEventOffsets(JSON.parse(savedOffsets));
-      } catch (e) {
-        setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
-      }
-    } else {
-      setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
-    }
-
-    if (savedChecklist) {
-      try {
-        setChecklist(JSON.parse(savedChecklist));
-      } catch (e) {
-        setChecklist([]);
-      }
-    } else {
-      setChecklist([
-        {
-          id: "1",
-          text: "確認護照效期大於 6 個月",
-          completed: false,
-          notes: "抽屜第二格",
-        },
-        {
-          id: "2",
-          text: "開通海外信用卡刷卡與海外提款",
-          completed: false,
-          notes: "主刷中信/備用富邦",
-        },
-      ]);
-    }
-
-    if (savedAlarms) {
-      try {
-        setAlarms(JSON.parse(savedAlarms));
-      } catch (e) {
-        setAlarms({});
-      }
-    }
-
     if (savedRates) {
       try {
         setRates(JSON.parse(savedRates));
@@ -305,12 +283,37 @@ export default function Dashboard() {
     });
   };
 
+  // 把「清單/鬧鐘/分票/主案備案/時區」這幾項設定同步到雲端
+  // overrides 放這次真正改動的欄位（因為 React state 還沒更新完成，不能直接讀當下的 state）
+  const syncSettingsToCloud = (
+    overrides: Partial<{
+      checklist: ChecklistItem[];
+      alarms: Record<string, AlarmConfig>;
+      ticketSplits: Record<string, { total: number; split: number }>;
+      eventRoles: Record<string, "primary" | "backup">;
+      eventOffsets: Record<string, number>;
+    }>
+  ) => {
+    syncUserSettings({
+      checklist,
+      alarms,
+      ticketSplits,
+      eventRoles,
+      eventOffsets,
+      ...overrides,
+    }).catch((err) => {
+      console.error("同步設定到雲端失敗：", err);
+      setAiNotice("⚠️ 設定已更新在畫面上，但同步到雲端失敗，請檢查網路連線。");
+    });
+  };
+
   const saveChecklistToStorage = (newList: ChecklistItem[]) => {
     setChecklist(newList);
     localStorage.setItem(
       "nonstop_challenger_checklist",
       JSON.stringify(newList)
     );
+    syncSettingsToCloud({ checklist: newList });
   };
 
   const saveAlarmsToStorage = (newAlarms: Record<string, AlarmConfig>) => {
@@ -319,6 +322,7 @@ export default function Dashboard() {
       "nonstop_challenger_alarms",
       JSON.stringify(newAlarms)
     );
+    syncSettingsToCloud({ alarms: newAlarms });
   };
 
   // 旅遊 Checklist 操作
@@ -399,6 +403,7 @@ export default function Dashboard() {
       "nonstop_challenger_splits",
       JSON.stringify(newSplits)
     );
+    syncSettingsToCloud({ ticketSplits: newSplits });
   };
 
   const saveRolesToStorage = (
@@ -407,6 +412,7 @@ export default function Dashboard() {
     pushHistory();
     setEventRoles(newRoles);
     localStorage.setItem("nonstop_challenger_roles", JSON.stringify(newRoles));
+    syncSettingsToCloud({ eventRoles: newRoles });
   };
 
   const saveOffsetsToStorage = (newOffsets: Record<string, number>) => {
@@ -416,6 +422,7 @@ export default function Dashboard() {
       "nonstop_challenger_offsets",
       JSON.stringify(newOffsets)
     );
+    syncSettingsToCloud({ eventOffsets: newOffsets });
   };
 
   // 真正的多層復原：從歷史堆疊裡把最後一筆彈出，一路往回退
@@ -447,6 +454,12 @@ export default function Dashboard() {
       "nonstop_challenger_offsets",
       JSON.stringify(last.eventOffsets)
     );
+
+    syncSettingsToCloud({
+      ticketSplits: last.ticketSplits,
+      eventRoles: last.eventRoles,
+      eventOffsets: last.eventOffsets,
+    });
 
     const remaining = history.length - 1;
     setHistory((prev) => prev.slice(0, -1));
@@ -582,6 +595,7 @@ export default function Dashboard() {
     setReleasedAmount,
     triggerUndo,
     setAiNotice,
+    syncSettingsToCloud,
   });
 
   const handleStatusChange = (
@@ -689,7 +703,7 @@ export default function Dashboard() {
       setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } });
       setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
       setEventRoles({});
-      setChecklist([
+      const resetChecklist = [
         {
           id: "1",
           text: "確認護照效期大於 6 個月",
@@ -702,9 +716,17 @@ export default function Dashboard() {
           completed: false,
           notes: "主刷中信/備用富邦",
         },
-      ]);
+      ];
+      setChecklist(resetChecklist);
       setAlarms({});
       setRates({ TWD: 1, USD: 0.031, JPY: 4.85, EUR: 0.029 });
+      syncSettingsToCloud({
+        ticketSplits: { "event-yuuri-004": { total: 4, split: 2 } },
+        eventOffsets: { "event-yuuri-004": 9, "event-fujii-kaze-002": 8 },
+        eventRoles: {},
+        checklist: resetChecklist,
+        alarms: {},
+      });
       setAiNotice("🔄 已重設資料庫！(按 Ctrl+Z 可還原)");
     }
   };
