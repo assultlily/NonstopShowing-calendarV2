@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // 從網頁原始碼裡抓 <meta property="xxx" content="..."> 或反過來的順序
+// 用反向引用 (\1) 確保只在「同一種」引號結尾，避免內容裡剛好包含另一種引號字元時被提前截斷
 function extractMetaContent(html: string, property: string): string | null {
   const patterns = [
     new RegExp(
-      `<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']*)["']`,
+      `<meta[^>]+property=["']${property}["'][^>]+content=(["'])((?:(?!\\1).)*)\\1`,
       "i"
     ),
     new RegExp(
-      `<meta[^>]+content=["']([^"']*)["'][^>]+property=["']${property}["']`,
+      `<meta[^>]+content=(["'])((?:(?!\\1).)*)\\1[^>]+property=["']${property}["']`,
       "i"
     ),
     new RegExp(
-      `<meta[^>]+name=["']${property}["'][^>]+content=["']([^"']*)["']`,
+      `<meta[^>]+name=["']${property}["'][^>]+content=(["'])((?:(?!\\1).)*)\\1`,
       "i"
     ),
   ];
   for (const re of patterns) {
     const match = html.match(re);
-    if (match) return decodeHtmlEntities(match[1]);
+    if (match) return decodeHtmlEntities(match[2]);
   }
   return null;
 }
@@ -123,8 +124,10 @@ export async function POST(req: NextRequest) {
       response = await fetch(target.toString(), {
         headers: {
           "User-Agent":
-            "Mozilla/5.0 (compatible; NonstopChallengerBot/1.0; +https://nonstop-showing-calendar-v2.vercel.app)",
-          Accept: "text/html",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
         },
         signal: controller.signal,
       });
@@ -133,8 +136,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (!response.ok) {
+      // 403 / 429 常見於防機器人保護擋下請求，給使用者明確一點的說明
+      const isBotBlocked = response.status === 403 || response.status === 429;
       return NextResponse.json(
-        { error: `無法讀取此網址（狀態碼 ${response.status}）` },
+        {
+          error: isBotBlocked
+            ? "此網站有防機器人保護機制，暫時無法自動讀取內容，請手動輸入活動資訊"
+            : `無法讀取此網址（狀態碼 ${response.status}）`,
+        },
         { status: 502 }
       );
     }
@@ -150,6 +159,28 @@ export async function POST(req: NextRequest) {
     // 避免抓到超大頁面拖垮效能，只讀取前 500KB
     const fullText = await response.text();
     const html = fullText.slice(0, 500_000);
+
+    // 常見防機器人驗證頁面的關鍵字，抓到這些代表拿到的不是真正的活動頁面內容
+    const botChallengeMarkers = [
+      "Just a moment",
+      "Attention Required",
+      "cf-browser-verification",
+      "captcha",
+      "驗證您是真人",
+      "請完成驗證",
+    ];
+    const looksLikeBotChallenge = botChallengeMarkers.some((marker) =>
+      html.toLowerCase().includes(marker.toLowerCase())
+    );
+    if (looksLikeBotChallenge) {
+      return NextResponse.json(
+        {
+          error:
+            "此網站有防機器人驗證機制，暫時無法自動讀取內容，請手動輸入活動資訊",
+        },
+        { status: 502 }
+      );
+    }
 
     const ogTitle = extractMetaContent(html, "og:title");
     const ogDescription = extractMetaContent(html, "og:description");
