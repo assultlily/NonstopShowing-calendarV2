@@ -173,14 +173,18 @@ export function useAiInputProcessor({
       addNewEvent(newUrlEvent);
       setIsProcessing(false);
 
+      const dateStatusText = extractedDate
+        ? "日期已自動偵測"
+        : "⚠️ 未偵測到日期，請展開卡片點擊時間欄位手動設定";
+
       setAiNotice(
         fetchFailed
           ? `⚠️ [網址已匯入，但讀取失敗]：\n已建立基本卡片，請手動補上正確資訊。`
           : isKnownPlatform
-          ? `🎉 [網址自動辨識成功]：\n系統已為此連結【${agencyGuess}】建構專屬卡片，標題${
+          ? `🎉 [網址自動辨識成功]：\n系統已為此連結【${agencyGuess}】建構專屬卡片！\n標題${
               realTitle ? "已自動抓取" : "未抓到，請手動確認"
-            }！`
-          : `ℹ️ [通用網址已匯入]：\n已為您建置連結專案，請手動確認售票平台與時間！`
+            }，${dateStatusText}。`
+          : `ℹ️ [通用網址已匯入]：\n已為您建置連結專案，請手動確認售票平台。${dateStatusText}。`
       );
       setAiInput("");
       return;
