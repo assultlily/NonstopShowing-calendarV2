@@ -2123,6 +2123,7 @@ export default function Dashboard() {
         </section>
       </main>
 
+      
       {/* Footer */}
       <footer className="max-w-6xl mx-auto mt-12 pt-4 border-t border-slate-900 flex flex-col sm:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3.5 py-1.5 rounded-full text-[10px] text-emerald-400 font-mono tracking-wider shadow-inner">
