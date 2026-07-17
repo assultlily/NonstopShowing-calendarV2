@@ -17,6 +17,7 @@ import {
   Check,
   X,
   Trash2,
+  Users,
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
@@ -46,6 +47,12 @@ interface EventCardProps {
   availableOffsets: number[];
   alarmConfig: AlarmConfig;
   totalCost: number;
+  splitInfo: { total: number; split: number };
+  onSplitChange: (
+    eventId: string,
+    field: "total" | "split",
+    value: number
+  ) => void;
   formatAmount: (amountInTWD: number) => string;
   convertToUserLocalTime: (venueTimeStr: string, venueOffset: number) => string;
   onToggleAlarm: (eventId: string) => void;
@@ -78,6 +85,8 @@ export default function EventCard({
   availableOffsets,
   alarmConfig,
   totalCost,
+  splitInfo,
+  onSplitChange,
   formatAmount,
   convertToUserLocalTime,
   onToggleAlarm,
@@ -584,6 +593,56 @@ export default function EventCard({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* 分票／揪團分攤費用 */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 space-y-2">
+            <span className="font-semibold text-[11px] text-slate-200 flex items-center gap-1">
+              <Users size={12} className="text-indigo-400" />
+              {lang === "zh" ? "分票／費用分攤" : "Ticket Split"}
+            </span>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                {lang === "zh" ? "總票數" : "Total tickets"}
+                <input
+                  type="number"
+                  min={1}
+                  value={splitInfo.total}
+                  onChange={(e) =>
+                    onSplitChange(
+                      event.id,
+                      "total",
+                      parseInt(e.target.value) || 1
+                    )
+                  }
+                  className="w-14 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                {lang === "zh" ? "分攤人數" : "People splitting"}
+                <input
+                  type="number"
+                  min={1}
+                  value={splitInfo.split}
+                  onChange={(e) =>
+                    onSplitChange(
+                      event.id,
+                      "split",
+                      parseInt(e.target.value) || 1
+                    )
+                  }
+                  className="w-14 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </label>
+            </div>
+            <div className="flex justify-between items-center pt-1.5 border-t border-slate-800/80 text-[11px]">
+              <span className="text-slate-400">
+                {lang === "zh" ? "每人應付" : "Per person"}
+              </span>
+              <span className="text-indigo-300 font-mono font-semibold">
+                {formatAmount(totalCost / splitInfo.split)}
+              </span>
+            </div>
           </div>
 
           <div>
