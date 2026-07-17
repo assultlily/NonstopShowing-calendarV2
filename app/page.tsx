@@ -15,6 +15,7 @@ import {
 } from "./lib/helpers";
 import EventCard from "./components/EventCard";
 import AiInputBar from "./components/AiInputBar";
+import TrashBin from "./components/TrashBin";
 import { useAiInputProcessor } from "./hooks/useAiInputProcessor";
 import {
   Calendar,
@@ -51,6 +52,7 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
 
   // 1. 語系狀態
   const [lang, setLang] = useState<LangType>("zh");
@@ -113,24 +115,32 @@ export default function Dashboard() {
   // 資金釋放特效狀態
   const [releasedAmount, setReleasedAmount] = useState<number | null>(null);
 
-  // 復原系統快照
-  const [previousEvents, setPreviousEvents] = useState<ShowEvent[] | null>(
-    null
-  );
-  const [previousSplits, setPreviousSplits] = useState<Record<
-    string,
-    { total: number; split: number }
-  > | null>(null);
-  const [previousRoles, setPreviousRoles] = useState<Record<
-    string,
-    "primary" | "backup"
-  > | null>(null);
-  const [previousOffsets, setPreviousOffsets] = useState<Record<
-    string,
-    number
-  > | null>(null);
+  // 復原系統：歷史紀錄堆疊（取代原本只能記一步的單一快照），最多保留 20 步
+  const MAX_HISTORY = 20;
+  interface HistorySnapshot {
+    events: ShowEvent[];
+    ticketSplits: Record<string, { total: number; split: number }>;
+    eventRoles: Record<string, "primary" | "backup">;
+    eventOffsets: Record<string, number>;
+  }
+  const [history, setHistory] = useState<HistorySnapshot[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 在任何會修改資料的操作「之前」呼叫，把當下狀態推進歷史堆疊
+  const pushHistory = () => {
+    setHistory((prev) =>
+      [
+        ...prev,
+        {
+          events: [...events],
+          ticketSplits: { ...ticketSplits },
+          eventRoles: { ...eventRoles },
+          eventOffsets: { ...eventOffsets },
+        },
+      ].slice(-MAX_HISTORY)
+    );
+  };
 
   // 登入狀態監聽：頁面載入時檢查是否已有 session，並持續監聽登入/登出事件
   useEffect(() => {
@@ -285,9 +295,7 @@ export default function Dashboard() {
   // 儲存輔助：events 現在同步到 Supabase，其餘設定仍暫留在 localStorage
   const saveEventsToStorage = (newEvents: ShowEvent[], takeSnapshot = true) => {
     if (takeSnapshot) {
-      setPreviousEvents([...events]);
-      setPreviousRoles({ ...eventRoles });
-      setPreviousOffsets({ ...eventOffsets });
+      pushHistory();
     }
     const oldEvents = events;
     setEvents(newEvents);
@@ -371,7 +379,7 @@ export default function Dashboard() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-        if (previousEvents) {
+        if (history.length > 0) {
           e.preventDefault();
           triggerUndo();
         }
@@ -379,13 +387,13 @@ export default function Dashboard() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previousEvents, previousSplits, previousRoles, previousOffsets]);
+  }, [history]);
 
   const saveSplitsToStorage = (
     newSplits: Record<string, { total: number; split: number }>,
     takeSnapshot = true
   ) => {
-    if (takeSnapshot) setPreviousSplits({ ...ticketSplits });
+    if (takeSnapshot) pushHistory();
     setTicketSplits(newSplits);
     localStorage.setItem(
       "nonstop_challenger_splits",
@@ -396,13 +404,13 @@ export default function Dashboard() {
   const saveRolesToStorage = (
     newRoles: Record<string, "primary" | "backup">
   ) => {
-    setPreviousRoles({ ...eventRoles });
+    pushHistory();
     setEventRoles(newRoles);
     localStorage.setItem("nonstop_challenger_roles", JSON.stringify(newRoles));
   };
 
   const saveOffsetsToStorage = (newOffsets: Record<string, number>) => {
-    setPreviousOffsets({ ...eventOffsets });
+    pushHistory();
     setEventOffsets(newOffsets);
     localStorage.setItem(
       "nonstop_challenger_offsets",
@@ -410,47 +418,44 @@ export default function Dashboard() {
     );
   };
 
+  // 真正的多層復原：從歷史堆疊裡把最後一筆彈出，一路往回退
   const triggerUndo = () => {
-    if (!previousEvents) return;
+    if (history.length === 0) return;
+    const last = history[history.length - 1];
     const currentEvents = [...events];
-    const currentSplits = { ...ticketSplits };
-    const currentRoles = { ...eventRoles };
-    const currentOffsets = { ...eventOffsets };
 
-    setEvents(previousEvents);
-    syncEvents(previousEvents, currentEvents).catch((err) => {
+    setEvents(last.events);
+    syncEvents(last.events, currentEvents).catch((err) => {
       console.error("復原同步雲端失敗：", err);
       setAiNotice("⚠️ 復原已套用在畫面上，但同步到雲端失敗，請檢查網路連線。");
     });
 
-    if (previousSplits) {
-      setTicketSplits(previousSplits);
-      localStorage.setItem(
-        "nonstop_challenger_splits",
-        JSON.stringify(previousSplits)
-      );
-    }
-    if (previousRoles) {
-      setEventRoles(previousRoles);
-      localStorage.setItem(
-        "nonstop_challenger_roles",
-        JSON.stringify(previousRoles)
-      );
-    }
-    if (previousOffsets) {
-      setEventOffsets(previousOffsets);
-      localStorage.setItem(
-        "nonstop_challenger_offsets",
-        JSON.stringify(previousOffsets)
-      );
-    }
+    setTicketSplits(last.ticketSplits);
+    localStorage.setItem(
+      "nonstop_challenger_splits",
+      JSON.stringify(last.ticketSplits)
+    );
 
-    setPreviousEvents(currentEvents);
-    setPreviousSplits(currentSplits);
-    setPreviousRoles(currentRoles);
-    setPreviousOffsets(currentOffsets);
+    setEventRoles(last.eventRoles);
+    localStorage.setItem(
+      "nonstop_challenger_roles",
+      JSON.stringify(last.eventRoles)
+    );
 
-    setAiNotice("↩️ 已成功復原至上一步！");
+    setEventOffsets(last.eventOffsets);
+    localStorage.setItem(
+      "nonstop_challenger_offsets",
+      JSON.stringify(last.eventOffsets)
+    );
+
+    const remaining = history.length - 1;
+    setHistory((prev) => prev.slice(0, -1));
+
+    setAiNotice(
+      remaining > 0
+        ? `↩️ 已復原！(還可以再復原 ${remaining} 步)`
+        : "↩️ 已復原至最初的狀態！"
+    );
   };
 
   // 全球時區換算
@@ -572,10 +577,8 @@ export default function Dashboard() {
     ticketSplits,
     setTicketSplits,
     eventOffsets,
-    previousEvents,
-    setPreviousEvents,
-    setPreviousSplits,
-    setPreviousOffsets,
+    canUndo: history.length > 0,
+    pushHistory,
     setReleasedAmount,
     triggerUndo,
     setAiNotice,
@@ -632,26 +635,49 @@ export default function Dashboard() {
   };
 
   // 使用者主動撤銷（刪除）一張卡片
+  // 刪除卡片：改用「軟刪除」，卡片會被移到垃圾桶而不是直接消失
+  // 因為之後要能任意順序翻出來復原，不適合用線性的 Ctrl+Z 處理，所以刪除這件事不會推進歷史堆疊
   const handleDeleteEvent = (id: string) => {
     const target = events.find((e) => e.id === id);
     const confirmed = confirm(
-      `確定要刪除「${target?.title || "這張卡片"}」嗎？此動作可以用 Ctrl+Z 復原。`
+      `確定要刪除「${target?.title || "這張卡片"}」嗎？可以之後去垃圾桶復原。`
+    );
+    if (!confirmed) return;
+
+    const updated = events.map((event) =>
+      event.id === id ? { ...event, deletedAt: new Date().toISOString() } : event
+    );
+    saveEventsToStorage(updated, false);
+    setAiNotice(`🗑️ 已將「${target?.title || "該活動"}」移入垃圾桶。`);
+  };
+
+  // 從垃圾桶復原一張卡片
+  const handleRestoreEvent = (id: string) => {
+    const updated = events.map((event) =>
+      event.id === id ? { ...event, deletedAt: null } : event
+    );
+    saveEventsToStorage(updated, false);
+    setAiNotice("♻️ 已從垃圾桶復原卡片。");
+  };
+
+  // 從垃圾桶永久刪除（這個動作沒辦法復原）
+  const handlePermanentlyDeleteEvent = (id: string) => {
+    const target = events.find((e) => e.id === id);
+    const confirmed = confirm(
+      `確定要永久刪除「${target?.title || "這張卡片"}」嗎？此動作無法復原！`
     );
     if (!confirmed) return;
 
     const updated = events.filter((event) => event.id !== id);
-    saveEventsToStorage(updated);
-    setAiNotice(`🗑️ 已刪除「${target?.title || "該活動"}」。`);
+    saveEventsToStorage(updated, false);
+    setAiNotice(`🗑️ 已永久刪除「${target?.title || "該活動"}」。`);
   };
 
   const availableOffsets = Array.from({ length: 27 }, (_, i) => i - 12);
 
   const handleResetData = () => {
     if (confirm("確定要重設回預設測試資料嗎？")) {
-      setPreviousEvents([...events]);
-      setPreviousSplits({ ...ticketSplits });
-      setPreviousRoles({ ...eventRoles });
-      setPreviousOffsets({ ...eventOffsets });
+      pushHistory();
 
       const oldEventsSnapshot = events;
       localStorage.clear();
@@ -715,8 +741,11 @@ export default function Dashboard() {
       0
     );
 
+  const deletedEvents = events.filter((event) => !!event.deletedAt);
+
   const filteredEvents = events
     .filter((event) => {
+      if (event.deletedAt) return false; // 垃圾桶裡的卡片不顯示在主列表
       const matchesCategory =
         categoryFilter === "all" || event.type === categoryFilter;
       const matchesStatus =
@@ -837,6 +866,20 @@ export default function Dashboard() {
               登出
             </button>
           </div>
+
+          {/* 垃圾桶 */}
+          <button
+            onClick={() => setIsTrashOpen(true)}
+            className="relative text-xs px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700 bg-slate-900 text-slate-300 hover:text-white transition-all flex items-center gap-1"
+            title={lang === "zh" ? "垃圾桶" : "Trash Bin"}
+          >
+            <Trash2 size={13} />
+            {deletedEvents.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {deletedEvents.length}
+              </span>
+            )}
+          </button>
 
           {/* 語系切換 */}
           <button
@@ -1060,7 +1103,7 @@ export default function Dashboard() {
           setAiInput={setAiInput}
           aiNotice={aiNotice}
           isProcessing={isAiProcessing}
-          previousEvents={previousEvents}
+          canUndo={history.length > 0}
           onProcess={handleProcessAiInput}
           onKeyDown={handleKeyDownInput}
           onUndo={triggerUndo}
@@ -1301,6 +1344,16 @@ export default function Dashboard() {
           <span>NONSTOP CHALLENGER OFFLINE-READY PWA ACTIVE (LOCALFIRST)</span>
         </div>
       </footer>
+
+      {isTrashOpen && (
+        <TrashBin
+          lang={lang}
+          deletedEvents={deletedEvents}
+          onClose={() => setIsTrashOpen(false)}
+          onRestore={handleRestoreEvent}
+          onPermanentlyDelete={handlePermanentlyDeleteEvent}
+        />
+      )}
     </div>
   );
 }
