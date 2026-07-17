@@ -1341,7 +1341,11 @@ export default function Dashboard() {
       <footer className="max-w-6xl mx-auto mt-12 pt-4 border-t border-slate-900 flex flex-col sm:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3.5 py-1.5 rounded-full text-[10px] text-emerald-400 font-mono tracking-wider shadow-inner">
           <Wifi size={12} className="animate-pulse text-emerald-400" />
-          <span>NONSTOP CHALLENGER OFFLINE-READY PWA ACTIVE (LOCALFIRST)</span>
+          <span>
+            {lang === "zh"
+              ? "NONSTOP CHALLENGER 雲端同步已啟用"
+              : "NONSTOP CHALLENGER CLOUD SYNC ACTIVE"}
+          </span>
         </div>
       </footer>
 
