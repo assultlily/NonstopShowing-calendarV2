@@ -6,6 +6,16 @@ import { mockEvents as initialMockEvents, ShowEvent } from "./mockEvents";
 import { supabase } from "./lib/supabaseClient";
 import { fetchEvents, syncEvents } from "./lib/eventsApi";
 import { sendLoginLink, signOut } from "./lib/authApi";
+import { TRANSLATIONS, LangType } from "./lib/translations";
+import { ChecklistItem, AlarmConfig } from "./types";
+import {
+  getUtcTimestamp,
+  getNavigationUrl,
+  getEmbedMapIframeUrl,
+  formatGmtLabel,
+  identifyTicketPlatform,
+  getGoogleCalendarLink,
+} from "./lib/helpers";
 import {
   Calendar,
   List,
@@ -37,78 +47,6 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-
-// 語系字典設定
-const TRANSLATIONS = {
-  zh: {
-    title: "Nonstop Challenger 跨界流程調度中心",
-    subtitle: "直覺調度、彈性流暢。一鍵匯出、全面掌握 - 預算安全鎖",
-    budget: "確認預算",
-    escrow: "託管資金",
-    volume: "最大流量",
-    export: "匯出行程",
-    import: "匯入",
-    reset: "重設",
-    langBtn: "English",
-    searchPlaceholder: "搜尋專案名稱、負責人、藝人、IP、演出地點...",
-    currencyWidget: "即時匯率換算配置 (基準 1 TWD)",
-    customRate: "自訂匯率",
-    checklistTitle: "🧳 旅遊提醒清單 (Checklist)",
-    checklistPlaceholder: "新增提醒事項（例如：換日幣、帶護照）...",
-    addBtn: "新增",
-    memoPlaceholder: "點擊編輯備註...",
-    noChecklist: "目前沒有旅遊提醒，手動新增一個吧！",
-    conflictAlert: "精準防撞警報：此時段與其他行程在 3 小時內有時間衝突！",
-    alarmSet: "鬧鐘已設定",
-    alarmOff: "鬧鐘已關閉",
-    alarmAhead: "提前",
-    minutes: "分鐘",
-    hours: "小時",
-    alarmTriggered: "⏰ 鬧鐘提醒！活動即將開始：",
-  },
-  en: {
-    title: "Nonstop Challenger Inter-system Dispatch Center",
-    subtitle:
-      "Intuitive dispatching, flexible and smooth. One-click export, complete control - Budget Safe Lock",
-    budget: "CONFIRMED BUDGET",
-    escrow: "LOCKED ESCROW FUNDS",
-    volume: "MAX FLOW VOLUME",
-    export: "Export",
-    import: "Import",
-    reset: "Reset",
-    langBtn: "繁體中文",
-    searchPlaceholder: "Search project, owner, artist, IP, venue...",
-    currencyWidget: "Exchange Rate Config (Base 1 TWD)",
-    customRate: "Custom Rate",
-    checklistTitle: "🧳 Travel Checklist",
-    checklistPlaceholder: "Add reminder (e.g., Get Cash, Passport)...",
-    addBtn: "Add",
-    memoPlaceholder: "Click to add notes...",
-    noChecklist: "No reminders. Add one manually!",
-    conflictAlert:
-      "Conflict Alert: This event conflicts with other schedules within 3 hours!",
-    alarmSet: "Alarm Set",
-    alarmOff: "Alarm Disabled",
-    alarmAhead: "ahead",
-    minutes: "mins",
-    hours: "hrs",
-    alarmTriggered: "⏰ Alarm Alert! Event starting soon: ",
-  },
-};
-
-type LangType = "zh" | "en";
-
-interface ChecklistItem {
-  id: string;
-  text: string;
-  completed: boolean;
-  notes: string;
-}
-
-interface AlarmConfig {
-  enabled: boolean;
-  minutesAhead: number; // 提前幾分鐘
-}
 
 export default function Dashboard() {
   // 帳號登入狀態
@@ -555,21 +493,6 @@ export default function Dashboard() {
   };
 
   // 取得 UTC 毫秒戳記
-  const getUtcTimestamp = (timeStr: string, offset: number) => {
-    try {
-      const parts = timeStr.split(" ");
-      const datePart = parts[0];
-      const timePart = parts[1] || "12:00";
-      const [year, month, day] = datePart.split("-").map(Number);
-      const [hours, minutes] = timePart.split(":").map(Number);
-
-      const date = new Date(year, month - 1, day, hours, minutes);
-      return date.getTime() - offset * 60 * 60 * 1000;
-    } catch (e) {
-      return 0;
-    }
-  };
-
   // 【精準防撞時間衝突偵測：重疊 3 小時內】
   const getConflictingEvents = (currentEvent: ShowEvent) => {
     const currentOffset =
@@ -590,32 +513,6 @@ export default function Dashboard() {
       // 防撞界限設為 3 小時
       return hoursDiff < 3;
     });
-  };
-
-  const getNavigationUrl = (locationName: string) => {
-    const base = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-      locationName
-    )}`;
-    // 若是惡意開頭，強制導向 Google 首頁
-    return base.startsWith("https://") ? base : "https://www.google.com";
-  };
-
-  const getEmbedMapIframeUrl = (locationName: string) => {
-    let q = "台北小巨蛋";
-    if (locationName.includes("世運") || locationName.includes("高雄"))
-      q = "高雄國家體育場";
-    if (locationName.includes("理律")) q = "台北市信義區忠孝東路四段555號";
-    if (locationName.includes("華山")) q = "華山1914文化創意產業園區";
-
-    const query = encodeURIComponent(locationName || q);
-    const url = `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
-
-    // 確保輸出的 URL 只有 https 開頭，防止 iframe 注入
-    return url.startsWith("https://") ? url : "about:blank";
-  };
-  const formatGmtLabel = (offset: number) => {
-    if (offset === 0) return "GMT+0";
-    return offset > 0 ? `GMT+${offset}` : `GMT${offset}`;
   };
 
   const exportData = () => {
@@ -674,56 +571,6 @@ export default function Dashboard() {
       }
     };
     reader.readAsText(file);
-  };
-
-  // 售票平台偵測系統：深度支持海外及台灣主流平台
-  const identifyTicketPlatform = (url: string) => {
-    const lowercaseUrl = url.toLowerCase();
-
-    // 1. 台灣主流平台
-    if (lowercaseUrl.includes("tixcraft.com"))
-      return { platform: "tixCraft 拓元售票", color: "text-rose-400" };
-    if (lowercaseUrl.includes("kktix.cc") || lowercaseUrl.includes("kktix.com"))
-      return { platform: "KKTIX 售票", color: "text-teal-400" };
-    if (lowercaseUrl.includes("kham.com.tw"))
-      return { platform: "KHAM 寬宏售票", color: "text-amber-400" };
-    if (
-      lowercaseUrl.includes("udnfunlife.com") ||
-      lowercaseUrl.includes("udnticket")
-    )
-      return { platform: "udn 售票網", color: "text-blue-400" };
-    if (
-      lowercaseUrl.includes("famiticket.com.tw") ||
-      lowercaseUrl.includes("famiport")
-    )
-      return { platform: "FamiTicket 全網購票", color: "text-green-400" };
-    if (lowercaseUrl.includes("opentix.life"))
-      return { platform: "OPENTIX 兩廳院文化生活", color: "text-cyan-400" };
-    if (lowercaseUrl.includes("ticketplus.com.tw"))
-      return { platform: "遠大售票", color: "text-emerald-400" };
-    if (lowercaseUrl.includes("ticket.com.tw"))
-      return { platform: "年代售票", color: "text-orange-400" };
-    if (
-      lowercaseUrl.includes("mna.com.tw") ||
-      lowercaseUrl.includes("mnaticket.com.tw")
-    )
-      return { platform: "MNA 牛耳藝術", color: "text-yellow-600" };
-    if (lowercaseUrl.includes("ibon.com.tw"))
-      return { platform: "ibon 售票系統", color: "text-red-500" };
-
-    // 2. 海外主流平台
-    if (lowercaseUrl.includes("livenation"))
-      return { platform: "Live Nation 理想國", color: "text-yellow-400" };
-    if (lowercaseUrl.includes("ticketmaster"))
-      return { platform: "Ticketmaster", color: "text-sky-400" };
-    if (lowercaseUrl.includes("confetti-web.com"))
-      return { platform: "Confetti 票務", color: "text-purple-400" };
-    if (lowercaseUrl.includes("pia.jp"))
-      return { platform: "Ticket Pia (ぴあ)", color: "text-indigo-400" };
-    if (lowercaseUrl.includes("eplus.jp"))
-      return { platform: "eplus (イープラス)", color: "text-pink-400" };
-
-    return null;
   };
 
   const handleProcessAiInput = (rawInput: string) => {
@@ -1055,38 +902,6 @@ export default function Dashboard() {
       setRates({ TWD: 1, USD: 0.031, JPY: 4.85, EUR: 0.029 });
       setAiNotice("🔄 已重設資料庫！(按 Ctrl+Z 可還原)");
     }
-  };
-
-  const getGoogleCalendarLink = (
-    title: string,
-    dateStr: string,
-    details: string
-  ) => {
-    let cleanDate = "";
-    for (let i = 0; i < dateStr.length; i++) {
-      const char = dateStr.charAt(i);
-      if (char >= "0" && char <= "9") {
-        cleanDate += char;
-      }
-    }
-
-    const dateFormatted =
-      cleanDate.length >= 8 ? cleanDate.substring(0, 8) : "20261231";
-    const startTime =
-      cleanDate.length >= 12
-        ? cleanDate.substring(0, 12)
-        : `${dateFormatted}T120000`;
-    const endTime =
-      cleanDate.length >= 12
-        ? `${cleanDate.substring(0, 8)}T${(
-            parseInt(cleanDate.substring(8, 10)) + 3
-          )
-            .toString()
-            .padStart(2, "0")}${cleanDate.substring(10, 12)}`
-        : `${dateFormatted}T150000`;
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
-      title
-    )}&dates=${startTime}/${endTime}&details=${encodeURIComponent(details)}`;
   };
 
   const statusBadges = {
@@ -2123,7 +1938,6 @@ export default function Dashboard() {
         </section>
       </main>
 
-      
       {/* Footer */}
       <footer className="max-w-6xl mx-auto mt-12 pt-4 border-t border-slate-900 flex flex-col sm:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3.5 py-1.5 rounded-full text-[10px] text-emerald-400 font-mono tracking-wider shadow-inner">
