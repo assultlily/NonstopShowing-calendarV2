@@ -19,6 +19,7 @@ type EventRow = {
   fan_events: ShowEvent["fanEvents"];
   curated_shops: ShowEvent["curatedShops"];
   deleted_at: string | null;
+  currency: string | null;
 };
 
 function rowToEvent(row: EventRow): ShowEvent {
@@ -38,6 +39,7 @@ function rowToEvent(row: EventRow): ShowEvent {
     fanEvents: row.fan_events || [],
     curatedShops: row.curated_shops || [],
     deletedAt: row.deleted_at || null,
+    currency: row.currency || "TWD",
   };
 }
 
@@ -58,6 +60,7 @@ function eventToRow(event: ShowEvent): Omit<EventRow, "user_id"> {
     fan_events: event.fanEvents,
     curated_shops: event.curatedShops,
     deleted_at: event.deletedAt || null,
+    currency: event.currency || "TWD",
   };
 }
 

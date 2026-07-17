@@ -242,6 +242,137 @@ export function getOffsetFromCountry(country: string | null): number | null {
   return COUNTRY_OFFSET_MAP[key] ?? null;
 }
 
+// 國家（代碼或英文名稱）→ 常用幣別代碼
+const COUNTRY_CURRENCY_MAP: Record<string, string> = {
+  jp: "JPY",
+  jpn: "JPY",
+  japan: "JPY",
+  tw: "TWD",
+  twn: "TWD",
+  taiwan: "TWD",
+  hk: "HKD",
+  hkg: "HKD",
+  "hong kong": "HKD",
+  cn: "CNY",
+  chn: "CNY",
+  china: "CNY",
+  kr: "KRW",
+  kor: "KRW",
+  "south korea": "KRW",
+  korea: "KRW",
+  sg: "SGD",
+  sgp: "SGD",
+  singapore: "SGD",
+  th: "THB",
+  tha: "THB",
+  thailand: "THB",
+  vn: "VND",
+  vnm: "VND",
+  vietnam: "VND",
+  ph: "PHP",
+  phl: "PHP",
+  philippines: "PHP",
+  my: "MYR",
+  mys: "MYR",
+  malaysia: "MYR",
+  id: "IDR",
+  idn: "IDR",
+  indonesia: "IDR",
+  us: "USD",
+  usa: "USD",
+  "united states": "USD",
+  ca: "CAD",
+  can: "CAD",
+  canada: "CAD",
+  gb: "GBP",
+  gbr: "GBP",
+  uk: "GBP",
+  "united kingdom": "GBP",
+  fr: "EUR",
+  fra: "EUR",
+  france: "EUR",
+  de: "EUR",
+  deu: "EUR",
+  germany: "EUR",
+  it: "EUR",
+  ita: "EUR",
+  italy: "EUR",
+  es: "EUR",
+  esp: "EUR",
+  spain: "EUR",
+  nl: "EUR",
+  nld: "EUR",
+  netherlands: "EUR",
+  be: "EUR",
+  bel: "EUR",
+  belgium: "EUR",
+  ch: "CHF",
+  che: "CHF",
+  switzerland: "CHF",
+  at: "EUR",
+  aut: "EUR",
+  austria: "EUR",
+  se: "SEK",
+  swe: "SEK",
+  sweden: "SEK",
+  no: "NOK",
+  nor: "NOK",
+  norway: "NOK",
+  dk: "DKK",
+  dnk: "DKK",
+  denmark: "DKK",
+  pl: "PLN",
+  pol: "PLN",
+  poland: "PLN",
+  au: "AUD",
+  aus: "AUD",
+  australia: "AUD",
+  nz: "NZD",
+  nzl: "NZD",
+  "new zealand": "NZD",
+};
+
+// 依國家猜測常用幣別，猜不到就回傳 null（呼叫端應該退回預設 TWD）
+export function getCurrencyFromCountry(country: string | null): string | null {
+  if (!country) return null;
+  const key = country.trim().toLowerCase();
+  return COUNTRY_CURRENCY_MAP[key] ?? null;
+}
+
+// 各幣別兌換 1 單位 = 多少新台幣（僅供粗略換算用，非即時匯率，重要花費建議自行核對）
+export const CURRENCY_TO_TWD: Record<string, number> = {
+  TWD: 1,
+  JPY: 0.21,
+  USD: 31.5,
+  EUR: 34,
+  GBP: 40,
+  THB: 0.88,
+  KRW: 0.023,
+  HKD: 4.0,
+  SGD: 23,
+  CNY: 4.3,
+  AUD: 20.5,
+  CAD: 22.5,
+  NZD: 19,
+  VND: 0.0013,
+  PHP: 0.56,
+  MYR: 6.7,
+  IDR: 0.002,
+  CHF: 36,
+  SEK: 3.0,
+  NOK: 2.9,
+  DKK: 4.6,
+  PLN: 7.9,
+};
+
+// 把某個幣別的金額換算成新台幣（找不到匯率就當作已經是台幣，不做轉換）
+export function convertToTwd(amount: number, currency: string | undefined): number {
+  const code = (currency || "TWD").toUpperCase();
+  const rate = CURRENCY_TO_TWD[code];
+  if (rate === undefined) return amount;
+  return amount * rate;
+}
+
 // 活動狀態徽章（狀態本身固定，不隨語系變動，因此可以是靜態常數）
 export const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   watchlist: {

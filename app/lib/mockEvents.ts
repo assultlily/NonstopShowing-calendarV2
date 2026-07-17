@@ -41,6 +41,8 @@ export interface ShowEvent {
     | "ended_no_ticket";
   userNotes: string;
   expenses: { item: string; cost: number }[];
+  // 這張卡片費用的原始幣別（例如票價本身是日圓、泰銖），不存在時視為 TWD
+  currency?: string;
   ticketStages: TicketStage[];
   fanEvents: FanEvent[];
   curatedShops: CuratedShop[];
