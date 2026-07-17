@@ -853,6 +853,27 @@ export default function Dashboard() {
     saveEventsToStorage(updated, false);
   };
 
+  // 手動調整卡片上的演出時間（例如官方公告時間有誤，或臨時異動）
+  const handleDateChange = (id: string, newShowDate: string) => {
+    const updated = events.map((event) =>
+      event.id === id ? { ...event, showDate: newShowDate } : event
+    );
+    saveEventsToStorage(updated);
+  };
+
+  // 手動調整卡片上的預估費用（直接以單一項目覆蓋原本的 expenses 明細）
+  const handleCostChange = (id: string, newTotalCost: number) => {
+    const updated = events.map((event) =>
+      event.id === id
+        ? {
+            ...event,
+            expenses: [{ item: "手動調整費用", cost: newTotalCost }],
+          }
+        : event
+    );
+    saveEventsToStorage(updated);
+  };
+
   const availableOffsets = Array.from({ length: 27 }, (_, i) => i - 12);
 
   const handleResetData = () => {
@@ -1447,6 +1468,8 @@ export default function Dashboard() {
                     }}
                     onStatusChange={handleStatusChange}
                     onNotesChange={handleNotesChange}
+                    onDateChange={handleDateChange}
+                    onCostChange={handleCostChange}
                   />
                 );
               })}
