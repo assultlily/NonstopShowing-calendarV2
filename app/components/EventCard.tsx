@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   MapPin,
   Navigation,
@@ -12,6 +13,9 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
@@ -21,6 +25,8 @@ import {
   getEmbedMapIframeUrl,
   formatGmtLabel,
   getGoogleCalendarLink,
+  showDateToInputValue,
+  inputValueToShowDate,
   STATUS_BADGES,
 } from "../lib/helpers";
 
@@ -50,6 +56,8 @@ interface EventCardProps {
     status: ShowEvent["statusLifecycle"]
   ) => void;
   onNotesChange: (eventId: string, notes: string) => void;
+  onDateChange: (eventId: string, newShowDate: string) => void;
+  onCostChange: (eventId: string, newTotalCost: number) => void;
 }
 
 export default function EventCard({
@@ -75,9 +83,43 @@ export default function EventCard({
   onSetBackup,
   onStatusChange,
   onNotesChange,
+  onDateChange,
+  onCostChange,
 }: EventCardProps) {
   const badge = STATUS_BADGES[event.statusLifecycle] || STATUS_BADGES.watchlist;
   const hasConflict = conflicts.length > 0;
+
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [draftDate, setDraftDate] = useState(() =>
+    showDateToInputValue(event.showDate)
+  );
+  const [isEditingCost, setIsEditingCost] = useState(false);
+  const [draftCost, setDraftCost] = useState(() => String(totalCost));
+
+  const handleSaveDate = () => {
+    if (draftDate) {
+      onDateChange(event.id, inputValueToShowDate(draftDate));
+    }
+    setIsEditingDate(false);
+  };
+
+  const handleCancelDate = () => {
+    setDraftDate(showDateToInputValue(event.showDate));
+    setIsEditingDate(false);
+  };
+
+  const handleSaveCost = () => {
+    const parsed = parseFloat(draftCost);
+    if (!isNaN(parsed) && parsed >= 0) {
+      onCostChange(event.id, parsed);
+    }
+    setIsEditingCost(false);
+  };
+
+  const handleCancelCost = () => {
+    setDraftCost(String(totalCost));
+    setIsEditingCost(false);
+  };
 
   return (
     <div
@@ -128,12 +170,51 @@ export default function EventCard({
               <span className="flex items-center gap-1">
                 🏟️ {lang === "zh" ? "舉辦地時間" : "Venue Time"}
               </span>
-              <span className="font-mono text-slate-300">
-                {event.showDate.split(" ")[0]}{" "}
-                <span className="text-[9px] text-purple-400">
-                  ({formatGmtLabel(venueOffset)})
+              {isEditingDate ? (
+                <span
+                  className="flex items-center gap-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="datetime-local"
+                    value={draftDate}
+                    onChange={(e) => setDraftDate(e.target.value)}
+                    className="bg-slate-900 border border-purple-500 rounded px-1 py-0.5 text-[10px] text-slate-200 font-mono focus:outline-none"
+                  />
+                  <button
+                    onClick={handleSaveDate}
+                    className="text-emerald-400 hover:text-emerald-300"
+                    title={lang === "zh" ? "儲存" : "Save"}
+                  >
+                    <Check size={12} />
+                  </button>
+                  <button
+                    onClick={handleCancelDate}
+                    className="text-slate-500 hover:text-slate-300"
+                    title={lang === "zh" ? "取消" : "Cancel"}
+                  >
+                    <X size={12} />
+                  </button>
                 </span>
-              </span>
+              ) : (
+                <span className="font-mono text-slate-300 flex items-center gap-1">
+                  {event.showDate.split(" ")[0]}{" "}
+                  <span className="text-[9px] text-purple-400">
+                    ({formatGmtLabel(venueOffset)})
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDraftDate(showDateToInputValue(event.showDate));
+                      setIsEditingDate(true);
+                    }}
+                    className="text-slate-500 hover:text-purple-300 ml-0.5"
+                    title={lang === "zh" ? "手動調整時間" : "Edit time"}
+                  >
+                    <Pencil size={10} />
+                  </button>
+                </span>
+              )}
             </div>
             <div className="flex justify-between items-center text-emerald-400 font-medium text-[10px]">
               <span className="flex items-center gap-1 pl-4">
@@ -153,7 +234,49 @@ export default function EventCard({
             <span>
               💰 {lang === "zh" ? "預估規費/票面價" : "Est. Cost"}
             </span>
-            <span>{formatAmount(totalCost)}</span>
+            {isEditingCost ? (
+              <span
+                className="flex items-center gap-1"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="number"
+                  min="0"
+                  value={draftCost}
+                  onChange={(e) => setDraftCost(e.target.value)}
+                  className="w-20 bg-slate-900 border border-amber-500 rounded px-1 py-0.5 text-[10px] text-slate-200 font-mono focus:outline-none"
+                />
+                <button
+                  onClick={handleSaveCost}
+                  className="text-emerald-400 hover:text-emerald-300"
+                  title={lang === "zh" ? "儲存" : "Save"}
+                >
+                  <Check size={12} />
+                </button>
+                <button
+                  onClick={handleCancelCost}
+                  className="text-slate-500 hover:text-slate-300"
+                  title={lang === "zh" ? "取消" : "Cancel"}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                {formatAmount(totalCost)}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDraftCost(String(totalCost));
+                    setIsEditingCost(true);
+                  }}
+                  className="text-slate-500 hover:text-amber-300"
+                  title={lang === "zh" ? "手動調整費用" : "Edit cost"}
+                >
+                  <Pencil size={10} />
+                </button>
+              </span>
+            )}
           </div>
         </div>
 
@@ -304,21 +427,43 @@ export default function EventCard({
                   ? "時間相近行程防撞調配"
                   : "Schedule Conflict Resolution"}
               </p>
+
+              {/* 列出衝突的另一張／多張卡片，方便直接比對時間 */}
+              <div className="mt-2 space-y-1.5">
+                {conflicts.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between bg-slate-950/60 border border-slate-800/60 rounded px-2 py-1.5 text-[10px]"
+                  >
+                    <span className="text-slate-300 truncate mr-2">
+                      {c.title}
+                    </span>
+                    <span className="font-mono text-slate-500 flex-shrink-0">
+                      {c.showDate.split(" ")[1] || c.showDate}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
               <div className="flex gap-2 mt-2">
                 <button
-                  onClick={() =>
+                  onClick={(e) => {
+                    e.stopPropagation();
                     onSetPrimary(
                       event.id,
                       conflicts.map((c) => c.id)
-                    )
-                  }
+                    );
+                  }}
                   className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-amber-950/40 border-amber-500 text-amber-400"
                 >
                   <Star size={10} className="fill-amber-400" />
                   {lang === "zh" ? "設為此時段主案" : "Set Primary"}
                 </button>
                 <button
-                  onClick={() => onSetBackup(event.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSetBackup(event.id);
+                  }}
                   className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded text-[10px] font-semibold border bg-slate-900 border-slate-800 text-slate-400"
                 >
                   <Shield size={10} />{" "}
