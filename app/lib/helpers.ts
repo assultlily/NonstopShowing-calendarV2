@@ -25,13 +25,7 @@ export function getNavigationUrl(locationName: string): string {
 }
 
 export function getEmbedMapIframeUrl(locationName: string): string {
-  let q = "台北小巨蛋";
-  if (locationName.includes("世運") || locationName.includes("高雄"))
-    q = "高雄國家體育場";
-  if (locationName.includes("理律")) q = "台北市信義區忠孝東路四段555號";
-  if (locationName.includes("華山")) q = "華山1914文化創意產業園區";
-
-  const query = encodeURIComponent(locationName || q);
+  const query = encodeURIComponent(locationName);
   const url = `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
 
   // 確保輸出的 URL 只有 https 開頭，防止 iframe 注入
