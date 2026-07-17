@@ -41,9 +41,13 @@ export interface ShowEvent {
     | "ended_no_ticket";
   userNotes: string;
   expenses: { item: string; cost: number }[];
+  // 這張卡片費用的原始幣別（例如票價本身是日圓、泰銖），不存在時視為 TWD
+  currency?: string;
   ticketStages: TicketStage[];
   fanEvents: FanEvent[];
   curatedShops: CuratedShop[];
+  // 軟刪除標記：不存在或 null 代表正常顯示，有值代表已被丟進垃圾桶（存刪除當下的時間）
+  deletedAt?: string | null;
 }
 
 export const mockEvents: ShowEvent[] = [

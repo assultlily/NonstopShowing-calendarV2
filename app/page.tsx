@@ -13,6 +13,7 @@ import {
   getUtcTimestamp,
   formatGmtLabel,
   STATUS_BADGES,
+  convertToTwd,
 } from "./lib/helpers";
 import EventCard from "./components/EventCard";
 import AiInputBar from "./components/AiInputBar";
@@ -610,7 +611,10 @@ export default function Dashboard() {
         oldEvent.statusLifecycle === "waiting_list") &&
       newStatus === "ended_no_ticket"
     ) {
-      const cost = oldEvent.expenses.reduce((sum, exp) => sum + exp.cost, 0);
+      const cost = convertToTwd(
+        oldEvent.expenses.reduce((sum, exp) => sum + exp.cost, 0),
+        oldEvent.currency
+      );
       setReleasedAmount(cost);
       setTimeout(() => setReleasedAmount(null), 5000);
     }
@@ -647,6 +651,14 @@ export default function Dashboard() {
         : event
     );
     saveEventsToStorage(updated);
+  };
+
+  // 變更卡片費用的原始幣別（例如原本記成台幣，改成日圓）
+  const handleCurrencyChange = (id: string, newCurrency: string) => {
+    const updated = events.map((event) =>
+      event.id === id ? { ...event, currency: newCurrency } : event
+    );
+    saveEventsToStorage(updated, false);
   };
 
   // 使用者主動撤銷（刪除）一張卡片
@@ -759,22 +771,34 @@ export default function Dashboard() {
   const confirmedExpenses = events
     .filter(
       (e) =>
-        e.statusLifecycle === "purchased" ||
-        e.statusLifecycle === "ticket_splitting"
+        !e.deletedAt &&
+        (e.statusLifecycle === "purchased" ||
+          e.statusLifecycle === "ticket_splitting")
     )
     .reduce(
-      (sum, e) => sum + e.expenses.reduce((s, exp) => s + exp.cost, 0),
+      (sum, e) =>
+        sum +
+        convertToTwd(
+          e.expenses.reduce((s, exp) => s + exp.cost, 0),
+          e.currency
+        ),
       0
     );
 
   const drawingExpenses = events
     .filter(
       (e) =>
-        e.statusLifecycle === "applied_drawing" ||
-        e.statusLifecycle === "waiting_list"
+        !e.deletedAt &&
+        (e.statusLifecycle === "applied_drawing" ||
+          e.statusLifecycle === "waiting_list")
     )
     .reduce(
-      (sum, e) => sum + e.expenses.reduce((s, exp) => s + exp.cost, 0),
+      (sum, e) =>
+        sum +
+        convertToTwd(
+          e.expenses.reduce((s, exp) => s + exp.cost, 0),
+          e.currency
+        ),
       0
     );
 
@@ -1222,10 +1246,11 @@ export default function Dashboard() {
                   enabled: false,
                   minutesAhead: 30,
                 };
-                const totalCost = event.expenses.reduce(
+                const nativeCost = event.expenses.reduce(
                   (sum, exp) => sum + exp.cost,
                   0
                 );
+                const totalCost = convertToTwd(nativeCost, event.currency);
                 const splitInfo = ticketSplits[event.id] || {
                   total: 1,
                   split: 1,
@@ -1252,6 +1277,9 @@ export default function Dashboard() {
                     availableOffsets={availableOffsets}
                     alarmConfig={alarmConfig}
                     totalCost={totalCost}
+                    nativeCost={nativeCost}
+                    currency={event.currency || "TWD"}
+                    onCurrencyChange={handleCurrencyChange}
                     splitInfo={splitInfo}
                     onSplitChange={handleSplitChange}
                     formatAmount={formatAmount}
