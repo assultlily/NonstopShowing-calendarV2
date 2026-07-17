@@ -4,6 +4,7 @@ import {
   identifyTicketPlatform,
   extractDateFromText,
   getOffsetFromCountry,
+  getCurrencyFromCountry,
 } from "../lib/helpers";
 import { syncEvents } from "../lib/eventsApi";
 import { parseUrlContent } from "../lib/urlParser";
@@ -147,6 +148,15 @@ export function useAiInputProcessor({
             ? match.defaultOffset
             : countryOffset;
 
+        // 幣別猜測：平台只服務單一地區的話直接對應（台灣→TWD、日本→JPY），
+        // 不然就依國家資料猜，都猜不到就先預設 TWD（使用者可以在編輯費用時自行更改）
+        const guessedCurrency =
+          match?.defaultOffset === 8
+            ? "TWD"
+            : match?.defaultOffset === 9
+            ? "JPY"
+            : getCurrencyFromCountry(venueCountry) || "TWD";
+
         const statusNote = fetchFailed
           ? `⚠️ ${fetchErrorMessage}，已建立基本卡片，請手動補齊資訊。`
           : structuredDate
@@ -160,7 +170,9 @@ export function useAiInputProcessor({
             ? `\n🌍 已自動設定時區為 GMT${guessedOffset >= 0 ? "+" : ""}${guessedOffset}，請確認是否正確。`
             : "\n⚠️ 無法自動判斷場館時區，請展開卡片手動設定。";
 
-        const fallbackNotes = `【📬 網址自動化偵測建立】\n${statusNote}${timezoneNote}\n原始網址：${cleanInput}\n${
+        const currencyNote = `\n💱 費用幣別已預設為 ${guessedCurrency}，請在編輯費用時確認或更改。`;
+
+        const fallbackNotes = `【📬 網址自動化偵測建立】\n${statusNote}${timezoneNote}${currencyNote}\n原始網址：${cleanInput}\n${
           realDescription ? `\n網頁描述：${realDescription.slice(0, 200)}` : ""
         }\n\n請展開本卡片，自由修改隨手備忘、設定時區、或手動更動確切的演出時間。`;
 
@@ -180,6 +192,7 @@ export function useAiInputProcessor({
           statusLifecycle: "watchlist",
           userNotes: fallbackNotes,
           expenses: [{ item: "預估票規費項目", cost: 0 }],
+          currency: guessedCurrency,
           ticketStages: [
             {
               stageName: "網址情報源已鎖定",
@@ -281,6 +294,7 @@ export function useAiInputProcessor({
           statusLifecycle: "applied_drawing",
           userNotes: "此活動為打字動態自動生成。可自由輸入修改備忘錄。",
           expenses: [{ item: "預估票面費", cost: 3600 }],
+          currency: "TWD",
           ticketStages: [
             { stageName: "系統開放登記", saleTime: "即日起", status: "ended" },
             {
