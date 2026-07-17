@@ -95,7 +95,34 @@ export function identifyTicketPlatform(
   return null;
 }
 
-// 產生「加入 Google 日曆」連結
+// 活動狀態徽章（狀態本身固定，不隨語系變動，因此可以是靜態常數）
+export const STATUS_BADGES: Record<string, { label: string; color: string }> = {
+  watchlist: {
+    label: "👀 觀察中",
+    color: "bg-slate-800 text-slate-300 border-slate-700",
+  },
+  applied_drawing: {
+    label: "🗳️ 已登記抽選",
+    color: "bg-blue-950/50 text-blue-400 border-blue-800",
+  },
+  purchased: {
+    label: "🎟️ 購入完成",
+    color: "bg-emerald-950/50 text-emerald-400 border-emerald-800",
+  },
+  ticket_splitting: {
+    label: "📲 電子票分票中",
+    color: "bg-indigo-950/50 text-indigo-400 border-indigo-800",
+  },
+  waiting_list: {
+    label: "⏳ 等待候補中",
+    color: "bg-amber-950/50 text-amber-400 border-amber-800",
+  },
+  ended_no_ticket: {
+    label: "❌ 遺憾落選",
+    color: "bg-rose-950/50 text-rose-400 border-rose-900",
+  },
+};
+
 export function getGoogleCalendarLink(
   title: string,
   dateStr: string,
