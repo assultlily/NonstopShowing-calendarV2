@@ -315,16 +315,18 @@ export default function EventCard({
             <MapPin size={12} className="text-rose-400 flex-shrink-0" />
             <span className="truncate">{event.location}</span>
           </div>
-          <a
-            href={getNavigationUrl(event.location)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[10px] bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800/80 px-2 py-1 rounded transition-all font-medium"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Navigation size={10} />{" "}
-            {lang === "zh" ? "導航" : "Navigate"}
-          </a>
+          {!event.location.startsWith("未指定地點") && (
+            <a
+              href={getNavigationUrl(event.location)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[10px] bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800/80 px-2 py-1 rounded transition-all font-medium"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Navigation size={10} />{" "}
+              {lang === "zh" ? "導航" : "Navigate"}
+            </a>
+          )}
         </div>
       </div>
 
@@ -388,20 +390,30 @@ export default function EventCard({
                 ? "🗺️ 現地會場街景與周邊地圖"
                 : "🏟️ Venue & Surrounding Map"}
             </h4>
-            <div className="w-full h-40 rounded-lg overflow-hidden border border-slate-800 bg-slate-950 relative">
-              <iframe
-                title="Venue Map"
-                width="100%"
-                height="100%"
-                frameBorder="0"
-                scrolling="no"
-                marginHeight={0}
-                marginWidth={0}
-                src={getEmbedMapIframeUrl(event.location)}
-                className="opacity-80 hover:opacity-100 transition-opacity"
-                style={{ filter: "invert(90%) hue-rotate(180deg)" }}
-              />
-            </div>
+            {event.location.startsWith("未指定地點") ? (
+              <div className="w-full h-40 rounded-lg border border-slate-800 bg-slate-950 flex items-center justify-center">
+                <p className="text-[11px] text-slate-600 text-center px-4">
+                  {lang === "zh"
+                    ? "尚未知道確切地點，請展開後手動輸入地址"
+                    : "Location unknown — please enter the venue manually"}
+                </p>
+              </div>
+            ) : (
+              <div className="w-full h-40 rounded-lg overflow-hidden border border-slate-800 bg-slate-950 relative">
+                <iframe
+                  title="Venue Map"
+                  width="100%"
+                  height="100%"
+                  frameBorder="0"
+                  scrolling="no"
+                  marginHeight={0}
+                  marginWidth={0}
+                  src={getEmbedMapIframeUrl(event.location)}
+                  className="opacity-80 hover:opacity-100 transition-opacity"
+                  style={{ filter: "invert(90%) hue-rotate(180deg)" }}
+                />
+              </div>
+            )}
           </div>
 
           {/* 舉辦地時區選單 */}
