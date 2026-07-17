@@ -75,6 +75,30 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&nbsp;/g, " ");
 }
 
+// 從 Event 節點的 location.address 裡嘗試抓出國家（用來判斷時區的第二層備案）
+function extractCountryFromEventNode(
+  eventNode: Record<string, unknown>
+): string | null {
+  const location = eventNode.location;
+  if (!location) return null;
+
+  const loc = Array.isArray(location) ? location[0] : location;
+  if (!loc || typeof loc !== "object") return null;
+
+  const address = (loc as Record<string, unknown>).address;
+  if (!address || typeof address !== "object") return null;
+
+  const addressObj = address as Record<string, unknown>;
+  const country = addressObj.addressCountry;
+
+  if (typeof country === "string") return country;
+  if (country && typeof country === "object") {
+    const countryObj = country as Record<string, unknown>;
+    if (typeof countryObj.name === "string") return countryObj.name;
+  }
+  return null;
+}
+
 // 遞迴在 JSON-LD 資料裡尋找 @type 是 Event（或包含 Event）的物件
 function findEventNode(node: unknown): Record<string, unknown> | null {
   if (Array.isArray(node)) {
@@ -102,7 +126,10 @@ function findEventNode(node: unknown): Record<string, unknown> | null {
 
 // 抓網頁裡 <script type="application/ld+json"> 區塊，嘗試找出 schema.org Event 的 startDate
 // 這是網站主動提供給搜尋引擎（例如 Google）看的結構化資料，格式固定，比從文字裡用規則猜日期準確很多
-function extractEventStartDate(html: string): string | null {
+function extractEventStructuredData(html: string): {
+  startDate: string | null;
+  country: string | null;
+} {
   const scriptRegex =
     /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let match: RegExpExecArray | null;
@@ -111,16 +138,24 @@ function extractEventStartDate(html: string): string | null {
     try {
       const json = JSON.parse(match[1].trim());
       const eventNode = findEventNode(json);
-      const startDate = eventNode?.startDate;
-      if (typeof startDate === "string" && startDate.length >= 10) {
-        return startDate;
+      if (!eventNode) continue;
+
+      const startDate = eventNode.startDate;
+      const validStartDate =
+        typeof startDate === "string" && startDate.length >= 10
+          ? startDate
+          : null;
+      const country = extractCountryFromEventNode(eventNode);
+
+      if (validStartDate || country) {
+        return { startDate: validStartDate, country };
       }
     } catch {
       // 這段 JSON-LD 格式不合法或不是我們要的結構，略過繼續找下一段
       continue;
     }
   }
-  return null;
+  return { startDate: null, country: null };
 }
 
 // 把 ISO 8601 格式（例如 2026-12-31T19:00:00+09:00）轉成專案內部使用的 "YYYY-MM-DD HH:mm" 格式
@@ -241,14 +276,17 @@ export async function POST(req: NextRequest) {
       ? decodeHtmlEntities(titleTagMatch[1].trim())
       : null;
 
-    const rawStartDate = extractEventStartDate(html);
-    const eventDate = rawStartDate ? normalizeIsoDate(rawStartDate) : null;
+    const structuredData = extractEventStructuredData(html);
+    const eventDate = structuredData.startDate
+      ? normalizeIsoDate(structuredData.startDate)
+      : null;
 
     return NextResponse.json({
       title: ogTitle || titleTag || null,
       description: ogDescription || null,
       image: ogImage || null,
       eventDate,
+      venueCountry: structuredData.country,
     });
   } catch (err) {
     console.error("parse-url API error:", err);
