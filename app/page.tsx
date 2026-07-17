@@ -740,7 +740,7 @@ export default function Dashboard() {
 
     const text = cleanInput.toLowerCase();
     let updatedEvents = [...events];
-    let noticeMessages: string[] = [];
+    const noticeMessages: string[] = [];
 
     // 網址智慧辨識建卡系統
     // 允許使用者貼上沒有 http(s):// 開頭的網址（例如從分享功能複製出來的網址常常會被拿掉協議）
@@ -989,7 +989,10 @@ export default function Dashboard() {
     }
   };
 
-  const handleStatusChange = (id: string, newStatus: any) => {
+  const handleStatusChange = (
+    id: string,
+    newStatus: ShowEvent["statusLifecycle"]
+  ) => {
     const oldEvent = events.find((e) => e.id === id);
     if (
       oldEvent &&
@@ -1171,9 +1174,11 @@ export default function Dashboard() {
     try {
       await sendLoginLink(authEmail.trim());
       setAuthStatus("sent");
-    } catch (err: any) {
+    } catch (err) {
       setAuthStatus("error");
-      setAuthErrorMsg(err?.message || "發送失敗，請稍後再試。");
+      setAuthErrorMsg(
+        err instanceof Error ? err.message : "發送失敗，請稍後再試。"
+      );
     }
   };
 
@@ -1277,7 +1282,9 @@ export default function Dashboard() {
           {/* 貨幣選擇器 */}
           <select
             value={currency}
-            onChange={(e) => setCurrency(e.target.value as any)}
+            onChange={(e) =>
+              setCurrency(e.target.value as "TWD" | "USD" | "JPY" | "EUR")
+            }
             className="bg-slate-900 text-white border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-lg text-xs focus:outline-none"
           >
             <option value="TWD">TWD (NT$)</option>
@@ -1308,6 +1315,13 @@ export default function Dashboard() {
               title="匯入資料備份檔"
             >
               <Upload size={12} /> {t.import}
+            </button>
+            <button
+              onClick={handleResetData}
+              className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-400 hover:bg-slate-800 px-2 py-1 rounded transition-colors border-l border-slate-800"
+              title="重設回預設測試資料"
+            >
+              <RotateCcw size={12} /> {t.reset}
             </button>
           </div>
 
@@ -1950,7 +1964,7 @@ export default function Dashboard() {
                             onChange={(e) =>
                               handleStatusChange(
                                 event.id,
-                                e.target.value as any
+                                e.target.value as ShowEvent["statusLifecycle"]
                               )
                             }
                             className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-slate-300 focus:outline-none"
