@@ -631,6 +631,19 @@ export default function Dashboard() {
     saveEventsToStorage(updated);
   };
 
+  // 使用者主動撤銷（刪除）一張卡片
+  const handleDeleteEvent = (id: string) => {
+    const target = events.find((e) => e.id === id);
+    const confirmed = confirm(
+      `確定要刪除「${target?.title || "這張卡片"}」嗎？此動作可以用 Ctrl+Z 復原。`
+    );
+    if (!confirmed) return;
+
+    const updated = events.filter((event) => event.id !== id);
+    saveEventsToStorage(updated);
+    setAiNotice(`🗑️ 已刪除「${target?.title || "該活動"}」。`);
+  };
+
   const availableOffsets = Array.from({ length: 27 }, (_, i) => i - 12);
 
   const handleResetData = () => {
@@ -1185,6 +1198,7 @@ export default function Dashboard() {
                     onNotesChange={handleNotesChange}
                     onDateChange={handleDateChange}
                     onCostChange={handleCostChange}
+                    onDelete={handleDeleteEvent}
                   />
                 );
               })}
