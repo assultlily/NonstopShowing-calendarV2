@@ -16,6 +16,7 @@ import {
   Pencil,
   Check,
   X,
+  Trash2,
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
@@ -58,6 +59,7 @@ interface EventCardProps {
   onNotesChange: (eventId: string, notes: string) => void;
   onDateChange: (eventId: string, newShowDate: string) => void;
   onCostChange: (eventId: string, newTotalCost: number) => void;
+  onDelete: (eventId: string) => void;
 }
 
 export default function EventCard({
@@ -85,6 +87,7 @@ export default function EventCard({
   onNotesChange,
   onDateChange,
   onCostChange,
+  onDelete,
 }: EventCardProps) {
   const badge = STATUS_BADGES[event.statusLifecycle] || STATUS_BADGES.watchlist;
   const hasConflict = conflicts.length > 0;
@@ -570,6 +573,19 @@ export default function EventCard({
               className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors h-14 resize-none"
             />
           </div>
+
+          {/* 刪除卡片：獨立在最下方，避免跟其他操作混在一起誤觸 */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(event.id);
+            }}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] font-semibold border border-rose-900/60 text-rose-400 bg-rose-950/20 hover:bg-rose-950/50 hover:border-rose-700 transition-all active:scale-95"
+          >
+            <Trash2 size={12} />
+            {lang === "zh" ? "刪除此卡片" : "Delete this card"}
+          </button>
         </div>
       )}
 
