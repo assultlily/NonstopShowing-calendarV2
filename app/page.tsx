@@ -71,10 +71,11 @@ export default function Dashboard() {
   });
 
   const handleRateChange = (cur: "USD" | "JPY" | "EUR", val: number) => {
-    setRates((prev) => ({
-      ...prev,
-      [cur]: val,
-    }));
+    setRates((prev) => {
+      const updated = { ...prev, [cur]: val };
+      localStorage.setItem("nonstop_challenger_rates", JSON.stringify(updated));
+      return updated;
+    });
   };
 
   // 統一貨幣換算輔助函式
@@ -593,7 +594,6 @@ export default function Dashboard() {
     setEventOffsets,
     canUndo: history.length > 0,
     pushHistory,
-    setReleasedAmount,
     triggerUndo,
     setAiNotice,
     syncSettingsToCloud,
@@ -652,6 +652,20 @@ export default function Dashboard() {
   // 使用者主動撤銷（刪除）一張卡片
   // 刪除卡片：改用「軟刪除」，卡片會被移到垃圾桶而不是直接消失
   // 因為之後要能任意順序翻出來復原，不適合用線性的 Ctrl+Z 處理，所以刪除這件事不會推進歷史堆疊
+  // 調整分票資訊（總票數／分攤人數），數字微調不特別推進復原歷史，避免每按一下都佔一格
+  const handleSplitChange = (
+    eventId: string,
+    field: "total" | "split",
+    value: number
+  ) => {
+    const current = ticketSplits[eventId] || { total: 1, split: 1 };
+    const updated = {
+      ...ticketSplits,
+      [eventId]: { ...current, [field]: Math.max(1, value) },
+    };
+    saveSplitsToStorage(updated, false);
+  };
+
   const handleDeleteEvent = (id: string) => {
     const target = events.find((e) => e.id === id);
     const confirmed = confirm(
@@ -963,8 +977,9 @@ export default function Dashboard() {
               // 獨立作用域，不影響組件其他狀態
               const targetEvents = events.filter(
                 (e) =>
-                  e.statusLifecycle === "purchased" ||
-                  e.statusLifecycle === "applied_drawing"
+                  !e.deletedAt &&
+                  (e.statusLifecycle === "purchased" ||
+                    e.statusLifecycle === "applied_drawing")
               );
               const headers = ["專案", "藝人", "地點", "日期", "主辦", "狀態"];
               const rows = targetEvents.map((e) => [
@@ -1211,6 +1226,10 @@ export default function Dashboard() {
                   (sum, exp) => sum + exp.cost,
                   0
                 );
+                const splitInfo = ticketSplits[event.id] || {
+                  total: 1,
+                  split: 1,
+                };
 
                 return (
                   <EventCard
@@ -1233,6 +1252,8 @@ export default function Dashboard() {
                     availableOffsets={availableOffsets}
                     alarmConfig={alarmConfig}
                     totalCost={totalCost}
+                    splitInfo={splitInfo}
+                    onSplitChange={handleSplitChange}
                     formatAmount={formatAmount}
                     convertToUserLocalTime={convertToUserLocalTime}
                     onToggleAlarm={toggleAlarm}
