@@ -2,6 +2,7 @@ export interface ParsedUrlInfo {
   title: string | null;
   description: string | null;
   image: string | null;
+  eventDate: string | null;
 }
 
 // 呼叫後端 /api/parse-url，讓伺服器代替瀏覽器去抓網頁內容
