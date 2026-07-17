@@ -94,12 +94,14 @@ export function useAiInputProcessor({
 
       let realTitle: string | null = null;
       let realDescription: string | null = null;
+      let structuredDate: string | null = null;
       let fetchFailed = false;
 
       try {
         const parsed = await parseUrlContent(normalizedUrl);
         realTitle = parsed.title;
         realDescription = parsed.description;
+        structuredDate = parsed.eventDate;
       } catch (err) {
         console.error("讀取網址內容失敗：", err);
         fetchFailed = true;
@@ -121,15 +123,18 @@ export function useAiInputProcessor({
         guessedTitle = `🌐 網址：${guessedTitle.toUpperCase()}`;
       }
 
-      // 嘗試從抓到的描述文字裡找日期，找不到才用預設值（且會提示使用者手動確認）
-      const extractedDate = realDescription
+      // 日期優先順序：① 網頁提供的結構化資料（最準確）② 從描述文字用規則猜 ③ 都抓不到就用預設值
+      const textGuessedDate = realDescription
         ? extractDateFromText(realDescription)
         : null;
+      const extractedDate = structuredDate || textGuessedDate;
       const showDate = extractedDate || "2026-12-31 19:00";
 
       const statusNote = fetchFailed
         ? "⚠️ 讀取網頁內容失敗（可能是網路問題或該網站不允許存取），已建立基本卡片，請手動補齊資訊。"
-        : extractedDate
+        : structuredDate
+        ? "✅ 已從網頁的活動資訊中精確抓到日期，請展開卡片確認是否正確。"
+        : textGuessedDate
         ? "✅ 已從網頁內容中偵測到日期，請展開卡片確認是否正確。"
         : "⚠️ 已抓到網頁標題，但沒有偵測到明確日期，請展開卡片點擊時間欄位手動設定。";
 
