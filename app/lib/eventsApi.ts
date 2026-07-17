@@ -1,6 +1,7 @@
 import { supabase } from "./supabaseClient";
 import { ShowEvent } from "../mockEvents";
 
+// Supabase 資料表欄位是 snake_case，前端 ShowEvent 是 camelCase，這裡負責互轉
 type EventRow = {
   id: string;
   user_id?: string;
@@ -17,6 +18,7 @@ type EventRow = {
   ticket_stages: ShowEvent["ticketStages"];
   fan_events: ShowEvent["fanEvents"];
   curated_shops: ShowEvent["curatedShops"];
+  deleted_at: string | null;
 };
 
 function rowToEvent(row: EventRow): ShowEvent {
@@ -35,6 +37,7 @@ function rowToEvent(row: EventRow): ShowEvent {
     ticketStages: row.ticket_stages || [],
     fanEvents: row.fan_events || [],
     curatedShops: row.curated_shops || [],
+    deletedAt: row.deleted_at || null,
   };
 }
 
@@ -54,9 +57,11 @@ function eventToRow(event: ShowEvent): Omit<EventRow, "user_id"> {
     ticket_stages: event.ticketStages,
     fan_events: event.fanEvents,
     curated_shops: event.curatedShops,
+    deleted_at: event.deletedAt || null,
   };
 }
 
+// 讀取目前登入者的所有活動卡片（RLS 會自動限制只能讀到自己的資料）
 export async function fetchEvents(): Promise<ShowEvent[]> {
   const { data, error } = await supabase
     .from("events")
@@ -66,6 +71,8 @@ export async function fetchEvents(): Promise<ShowEvent[]> {
   return (data || []).map(rowToEvent);
 }
 
+// 全量同步：把畫面上目前完整的事件陣列同步回 Supabase
+// 新增/修改的用 upsert；跟舊陣列比對後發現被移除的，額外送 delete 清掉
 export async function syncEvents(
   newEvents: ShowEvent[],
   previousEvents: ShowEvent[]
