@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { ShowEvent } from "../mockEvents";
-import { identifyTicketPlatform, extractDateFromText } from "../lib/helpers";
+import {
+  identifyTicketPlatform,
+  extractDateFromText,
+  getOffsetFromCountry,
+} from "../lib/helpers";
 import { syncEvents } from "../lib/eventsApi";
 import { parseUrlContent } from "../lib/urlParser";
 
@@ -15,6 +19,7 @@ interface UseAiInputProcessorParams {
   ticketSplits: Record<string, TicketSplit>;
   setTicketSplits: (splits: Record<string, TicketSplit>) => void;
   eventOffsets: Record<string, number>;
+  setEventOffsets: (offsets: Record<string, number>) => void;
   canUndo: boolean;
   pushHistory: () => void;
   setReleasedAmount: (amount: number | null) => void;
@@ -22,6 +27,7 @@ interface UseAiInputProcessorParams {
   setAiNotice: (msg: string) => void;
   syncSettingsToCloud: (overrides: {
     ticketSplits?: Record<string, TicketSplit>;
+    eventOffsets?: Record<string, number>;
   }) => void;
 }
 
@@ -31,6 +37,7 @@ export function useAiInputProcessor({
   ticketSplits,
   setTicketSplits,
   eventOffsets,
+  setEventOffsets,
   canUndo,
   pushHistory,
   setReleasedAmount,
@@ -93,6 +100,7 @@ export function useAiInputProcessor({
       let realTitle: string | null = null;
       let realDescription: string | null = null;
       let structuredDate: string | null = null;
+      let venueCountry: string | null = null;
       let fetchFailed = false;
       let fetchErrorMessage = "";
 
@@ -101,6 +109,7 @@ export function useAiInputProcessor({
         realTitle = parsed.title;
         realDescription = parsed.description;
         structuredDate = parsed.eventDate;
+        venueCountry = parsed.venueCountry;
       } catch (err) {
         console.error("讀取網址內容失敗：", err);
         fetchFailed = true;
@@ -131,6 +140,14 @@ export function useAiInputProcessor({
       const extractedDate = structuredDate || textGuessedDate;
       const showDate = extractedDate || "2026-12-31 19:00";
 
+      // 時區優先順序：① 平台本身只服務單一地區（最準確，例如台灣/日本售票網）
+      // ② 網頁地址資料判斷出的國家 ③ 都沒有就不設定，畫面會退回使用瀏覽器自己的時區
+      const countryOffset = getOffsetFromCountry(venueCountry);
+      const guessedOffset =
+        match?.defaultOffset !== undefined && match?.defaultOffset !== null
+          ? match.defaultOffset
+          : countryOffset;
+
       const statusNote = fetchFailed
         ? `⚠️ ${fetchErrorMessage}，已建立基本卡片，請手動補齊資訊。`
         : structuredDate
@@ -139,7 +156,12 @@ export function useAiInputProcessor({
         ? "✅ 已從網頁內容中偵測到日期，請展開卡片確認是否正確。"
         : "⚠️ 已抓到網頁標題，但沒有偵測到明確日期，請展開卡片點擊時間欄位手動設定。";
 
-      const fallbackNotes = `【📬 網址自動化偵測建立】\n${statusNote}\n原始網址：${cleanInput}\n${
+      const timezoneNote =
+        guessedOffset !== null
+          ? `\n🌍 已自動設定時區為 GMT${guessedOffset >= 0 ? "+" : ""}${guessedOffset}，請確認是否正確。`
+          : "\n⚠️ 無法自動判斷場館時區，請展開卡片手動設定。";
+
+      const fallbackNotes = `【📬 網址自動化偵測建立】\n${statusNote}${timezoneNote}\n原始網址：${cleanInput}\n${
         realDescription ? `\n網頁描述：${realDescription.slice(0, 200)}` : ""
       }\n\n請展開本卡片，自由修改隨手備忘、設定時區、或手動更動確切的演出時間。`;
 
@@ -149,11 +171,10 @@ export function useAiInputProcessor({
         artist: "隨網址自動辨識建構",
         type: "official",
         location:
-          text.includes("eplus") ||
-          text.includes("pia.jp") ||
-          text.includes("confetti")
-            ? "日本現地會場"
-            : "未指定地點 (請展開本卡片手動微調)",
+          venueCountry ||
+          (guessedOffset !== null
+            ? "海外現地會場"
+            : "未指定地點 (請展開本卡片手動微調)"),
         showDate,
         agency: agencyGuess,
         sourceUrl: normalizedUrl,
@@ -177,6 +198,21 @@ export function useAiInputProcessor({
       };
 
       addNewEvent(newUrlEvent);
+
+      // 有猜到時區的話，直接帶入，避免顯示時誤用瀏覽器自己的時區
+      if (guessedOffset !== null) {
+        const updatedOffsets = {
+          ...eventOffsets,
+          [newUrlEvent.id]: guessedOffset,
+        };
+        setEventOffsets(updatedOffsets);
+        localStorage.setItem(
+          "nonstop_challenger_offsets",
+          JSON.stringify(updatedOffsets)
+        );
+        syncSettingsToCloud({ eventOffsets: updatedOffsets });
+      }
+
       setIsProcessing(false);
 
       const dateStatusText = extractedDate
