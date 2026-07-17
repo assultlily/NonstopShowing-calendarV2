@@ -44,55 +44,181 @@ export function formatGmtLabel(offset: number): string {
 }
 
 // 售票平台偵測系統：深度支持海外及台灣主流平台
-export function identifyTicketPlatform(
-  url: string
-): { platform: string; color: string } | null {
+// defaultOffset：如果這個平台「只服務單一地區」（例如台灣、日本的售票網），可以放心直接給時區
+// 像 Ticketmaster、Live Nation 這種全球性平台，場次可能在任何國家，這裡故意回傳 null，不亂猜
+export function identifyTicketPlatform(url: string): {
+  platform: string;
+  color: string;
+  defaultOffset: number | null;
+} | null {
   const lowercaseUrl = url.toLowerCase();
 
-  // 1. 台灣主流平台
+  // 1. 台灣主流平台（GMT+8）
   if (lowercaseUrl.includes("tixcraft.com"))
-    return { platform: "tixCraft 拓元售票", color: "text-rose-400" };
+    return {
+      platform: "tixCraft 拓元售票",
+      color: "text-rose-400",
+      defaultOffset: 8,
+    };
   if (lowercaseUrl.includes("kktix.cc") || lowercaseUrl.includes("kktix.com"))
-    return { platform: "KKTIX 售票", color: "text-teal-400" };
+    return { platform: "KKTIX 售票", color: "text-teal-400", defaultOffset: 8 };
   if (lowercaseUrl.includes("kham.com.tw"))
-    return { platform: "KHAM 寬宏售票", color: "text-amber-400" };
+    return {
+      platform: "KHAM 寬宏售票",
+      color: "text-amber-400",
+      defaultOffset: 8,
+    };
   if (
     lowercaseUrl.includes("udnfunlife.com") ||
     lowercaseUrl.includes("udnticket")
   )
-    return { platform: "udn 售票網", color: "text-blue-400" };
+    return { platform: "udn 售票網", color: "text-blue-400", defaultOffset: 8 };
   if (
     lowercaseUrl.includes("famiticket.com.tw") ||
     lowercaseUrl.includes("famiport")
   )
-    return { platform: "FamiTicket 全網購票", color: "text-green-400" };
+    return {
+      platform: "FamiTicket 全網購票",
+      color: "text-green-400",
+      defaultOffset: 8,
+    };
   if (lowercaseUrl.includes("opentix.life"))
-    return { platform: "OPENTIX 兩廳院文化生活", color: "text-cyan-400" };
+    return {
+      platform: "OPENTIX 兩廳院文化生活",
+      color: "text-cyan-400",
+      defaultOffset: 8,
+    };
   if (lowercaseUrl.includes("ticketplus.com.tw"))
-    return { platform: "遠大售票", color: "text-emerald-400" };
+    return {
+      platform: "遠大售票",
+      color: "text-emerald-400",
+      defaultOffset: 8,
+    };
   if (lowercaseUrl.includes("ticket.com.tw"))
-    return { platform: "年代售票", color: "text-orange-400" };
+    return {
+      platform: "年代售票",
+      color: "text-orange-400",
+      defaultOffset: 8,
+    };
   if (
     lowercaseUrl.includes("mna.com.tw") ||
     lowercaseUrl.includes("mnaticket.com.tw")
   )
-    return { platform: "MNA 牛耳藝術", color: "text-yellow-600" };
+    return {
+      platform: "MNA 牛耳藝術",
+      color: "text-yellow-600",
+      defaultOffset: 8,
+    };
   if (lowercaseUrl.includes("ibon.com.tw"))
-    return { platform: "ibon 售票系統", color: "text-red-500" };
+    return {
+      platform: "ibon 售票系統",
+      color: "text-red-500",
+      defaultOffset: 8,
+    };
 
   // 2. 海外主流平台
+  // Live Nation / Ticketmaster 是全球性平台，場次可能在世界各地，不猜時區
   if (lowercaseUrl.includes("livenation"))
-    return { platform: "Live Nation 理想國", color: "text-yellow-400" };
+    return {
+      platform: "Live Nation 理想國",
+      color: "text-yellow-400",
+      defaultOffset: null,
+    };
   if (lowercaseUrl.includes("ticketmaster"))
-    return { platform: "Ticketmaster", color: "text-sky-400" };
+    return { platform: "Ticketmaster", color: "text-sky-400", defaultOffset: null };
+  // 以下這幾個是專門服務日本地區的售票網，可以放心給 GMT+9
   if (lowercaseUrl.includes("confetti-web.com"))
-    return { platform: "Confetti 票務", color: "text-purple-400" };
+    return {
+      platform: "Confetti 票務",
+      color: "text-purple-400",
+      defaultOffset: 9,
+    };
   if (lowercaseUrl.includes("pia.jp"))
-    return { platform: "Ticket Pia (ぴあ)", color: "text-indigo-400" };
+    return {
+      platform: "Ticket Pia (ぴあ)",
+      color: "text-indigo-400",
+      defaultOffset: 9,
+    };
   if (lowercaseUrl.includes("eplus.jp"))
-    return { platform: "eplus (イープラス)", color: "text-pink-400" };
+    return {
+      platform: "eplus (イープラス)",
+      color: "text-pink-400",
+      defaultOffset: 9,
+    };
 
   return null;
+}
+
+// 國家（代碼或英文名稱）→ 大致時區的對照表
+// 注意：美國、加拿大、澳洲、俄羅斯這類橫跨多時區的國家，這裡只能給一個「常見代表時區」的粗略猜測
+// 不保證每個場次都準，仍建議使用者自行確認
+const COUNTRY_OFFSET_MAP: Record<string, number> = {
+  jp: 9,
+  japan: 9,
+  tw: 8,
+  taiwan: 8,
+  hk: 8,
+  "hong kong": 8,
+  cn: 8,
+  china: 8,
+  kr: 9,
+  "south korea": 9,
+  korea: 9,
+  sg: 8,
+  singapore: 8,
+  th: 7,
+  thailand: 7,
+  vn: 7,
+  vietnam: 7,
+  ph: 8,
+  philippines: 8,
+  my: 8,
+  malaysia: 8,
+  id: 7,
+  indonesia: 7,
+  us: -5, // 代表美東；美國實際橫跨多個時區，僅供參考
+  usa: -5,
+  "united states": -5,
+  ca: -5, // 代表加東；加拿大同樣橫跨多時區
+  canada: -5,
+  gb: 0,
+  uk: 0,
+  "united kingdom": 0,
+  fr: 1,
+  france: 1,
+  de: 1,
+  germany: 1,
+  it: 1,
+  italy: 1,
+  es: 1,
+  spain: 1,
+  nl: 1,
+  netherlands: 1,
+  be: 1,
+  belgium: 1,
+  ch: 1,
+  switzerland: 1,
+  at: 1,
+  austria: 1,
+  se: 1,
+  sweden: 1,
+  no: 1,
+  norway: 1,
+  dk: 1,
+  denmark: 1,
+  pl: 1,
+  poland: 1,
+  au: 10, // 代表雪梨；澳洲同樣橫跨多時區
+  australia: 10,
+  nz: 12,
+  "new zealand": 12,
+};
+
+// 把地址資料裡的國家欄位（可能是代碼或全名）轉換成時區 offset，對不到就回傳 null
+export function getOffsetFromCountry(country: string | null): number | null {
+  if (!country) return null;
+  const key = country.trim().toLowerCase();
+  return COUNTRY_OFFSET_MAP[key] ?? null;
 }
 
 // 活動狀態徽章（狀態本身固定，不隨語系變動，因此可以是靜態常數）
