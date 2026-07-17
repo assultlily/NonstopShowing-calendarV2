@@ -1,4 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
+import { lookup } from "dns/promises";
+
+// 判斷一個 IP 是不是內網／本機位址（SSRF 防護用）
+function isPrivateIp(ip: string): boolean {
+  // IPv6 loopback / link-local / unique-local
+  if (
+    ip === "::1" ||
+    ip.startsWith("fe80:") ||
+    ip.startsWith("fc") ||
+    ip.startsWith("fd")
+  ) {
+    return true;
+  }
+
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
+  const [a, b] = parts;
+
+  if (a === 127) return true; // 127.0.0.0/8 loopback
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
+  if (a === 0) return true; // 0.0.0.0/8
+  return false;
+}
+
+// 確認目標網域「實際解析出來的 IP」不是內網位址
+// 防止有心人拿域名指向內網 IP 來繞過檢查（DNS rebinding）
+async function isSafeHostname(hostname: string): Promise<boolean> {
+  const lowerHost = hostname.toLowerCase();
+  if (lowerHost === "localhost" || lowerHost.endsWith(".local")) return false;
+
+  try {
+    const { address } = await lookup(hostname);
+    return !isPrivateIp(address);
+  } catch {
+    // 解析失敗就當作不安全，直接擋掉
+    return false;
+  }
+}
 
 // 從網頁原始碼裡抓 <meta property="xxx" content="..."> 或反過來的順序
 // 用反向引用 (\1) 確保只在「同一種」引號結尾，避免內容裡剛好包含另一種引號字元時被提前截斷
@@ -112,6 +153,15 @@ export async function POST(req: NextRequest) {
     if (!["http:", "https:"].includes(target.protocol)) {
       return NextResponse.json(
         { error: "只支援 http / https 網址" },
+        { status: 400 }
+      );
+    }
+
+    // SSRF 防護：確認目標不是內網或本機位址，避免這支 API 被拿來當跳板探測內部網路
+    const safe = await isSafeHostname(target.hostname);
+    if (!safe) {
+      return NextResponse.json(
+        { error: "這個網址無法讀取" },
         { status: 400 }
       );
     }
