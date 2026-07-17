@@ -18,6 +18,7 @@ import {
 import EventCard from "./components/EventCard";
 import AiInputBar from "./components/AiInputBar";
 import TrashBin from "./components/TrashBin";
+import CategoryChart from "./components/CategoryChart";
 import { useAiInputProcessor } from "./hooks/useAiInputProcessor";
 import {
   Calendar,
@@ -37,6 +38,7 @@ import {
   Square,
   Plus,
   Trash2,
+  PieChart,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -55,6 +57,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [isChartOpen, setIsChartOpen] = useState(false);
 
   // 1. 語系狀態
   const [lang, setLang] = useState<LangType>("zh");
@@ -1038,6 +1041,69 @@ export default function Dashboard() {
             {lang === "zh" ? "匯出 Excel" : "Export Excel"}
           </button>
 
+          <button
+            onClick={() => {
+              // 匯出「目前篩選中的分類」底下，還沒被丟進垃圾桶的所有卡片（不限狀態）
+              const targetEvents = events.filter(
+                (e) =>
+                  !e.deletedAt &&
+                  (categoryFilter === "all" || e.type === categoryFilter)
+              );
+              const headers = [
+                "專案",
+                "分類",
+                "藝人",
+                "地點",
+                "日期",
+                "主辦",
+                "狀態",
+                "費用",
+                "幣別",
+              ];
+              const rows = targetEvents.map((e) => [
+                String(e.title || "").replace(/[=+\-@,]/g, ""),
+                categoryLabels[e.type] || e.type,
+                String(e.artist || "").replace(/[=+\-@,]/g, ""),
+                String(e.location || "").replace(/[=+\-@,]/g, ""),
+                e.showDate || "",
+                e.agency || "",
+                e.statusLifecycle || "",
+                String(e.expenses.reduce((s, exp) => s + exp.cost, 0)),
+                e.currency || "TWD",
+              ]);
+
+              const csvContent =
+                "\uFEFF" +
+                [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+              const blob = new Blob([csvContent], {
+                type: "text/csv;charset=utf-8;",
+              });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              const categoryName =
+                categoryFilter === "all"
+                  ? "全部分類"
+                  : categoryLabels[categoryFilter] || categoryFilter;
+              link.download = `${categoryName}_${
+                new Date().toISOString().split("T")[0]
+              }.csv`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-1 text-[11px] text-cyan-300 hover:text-white hover:bg-cyan-900/30 border border-cyan-900/50 px-2 py-1.5 rounded-lg transition-all"
+            title="匯出目前篩選分類底下的所有卡片"
+          >
+            <FileText size={12} />{" "}
+            {lang === "zh"
+              ? `匯出「${
+                  categoryFilter === "all"
+                    ? "全部分類"
+                    : categoryLabels[categoryFilter] || categoryFilter
+                }」`
+              : "Export This Category"}
+          </button>
+
           <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex">
             <button
               onClick={() => setViewMode("show")}
@@ -1201,7 +1267,28 @@ export default function Dashboard() {
                 {categoryLabels[key]}
               </button>
             ))}
+            <button
+              onClick={() => setIsChartOpen((prev) => !prev)}
+              className={`text-xs px-3 py-1.5 rounded-lg whitespace-nowrap transition-all border flex items-center gap-1 ${
+                isChartOpen
+                  ? "bg-purple-950 text-purple-300 border-purple-500"
+                  : "bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700"
+              }`}
+            >
+              <PieChart size={13} />
+              {lang === "zh" ? "分類比例" : "Category Chart"}
+            </button>
           </div>
+
+          {isChartOpen && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <CategoryChart
+                events={events}
+                categoryLabels={categoryLabels}
+                lang={lang}
+              />
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-1.5 overflow-x-auto">
             <button
