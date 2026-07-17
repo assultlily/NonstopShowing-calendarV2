@@ -1,7 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import type { User } from "@supabase/supabase-js";
 import { mockEvents as initialMockEvents, ShowEvent } from "./mockEvents";
+import { supabase } from "./lib/supabaseClient";
+import { fetchEvents, syncEvents } from "./lib/eventsApi";
+import { sendLoginLink, signOut } from "./lib/authApi";
 import {
   Calendar,
   List,
@@ -107,6 +111,15 @@ interface AlarmConfig {
 }
 
 export default function Dashboard() {
+  // 帳號登入狀態
+  const [user, setUser] = useState<User | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authStatus, setAuthStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
+  const [authErrorMsg, setAuthErrorMsg] = useState("");
+
   const [viewMode, setViewMode] = useState<"show" | "ticket">("show");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -194,29 +207,45 @@ export default function Dashboard() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 初始化載入資料與時區偵測
+  // 登入狀態監聽：頁面載入時檢查是否已有 session，並持續監聽登入/登出事件
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+      setAuthChecking(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+      }
+    );
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // 登入後從 Supabase 讀取這位使用者的活動卡片（取代原本的 localStorage 讀取）
+  useEffect(() => {
+    if (!user) return;
+    fetchEvents()
+      .then((data) => {
+        setEvents(data.length > 0 ? data : initialMockEvents);
+      })
+      .catch((err) => {
+        console.error("讀取雲端資料失敗：", err);
+        setAiNotice("⚠️ 讀取雲端資料失敗，請檢查網路連線後重新整理頁面。");
+        setEvents(initialMockEvents);
+      });
+  }, [user]);
+
+  // 初始化載入資料與時區偵測（events 已改由上方 Supabase 讀取，這裡只處理仍留在本機的其他設定）
   useEffect(() => {
     const localOffset = -new Date().getTimezoneOffset() / 60;
     setBrowserOffset(localOffset);
 
-    const savedEvents = localStorage.getItem("nonstop_challenger_events");
     const savedSplits = localStorage.getItem("nonstop_challenger_splits");
     const savedRoles = localStorage.getItem("nonstop_challenger_roles");
     const savedOffsets = localStorage.getItem("nonstop_challenger_offsets");
     const savedChecklist = localStorage.getItem("nonstop_challenger_checklist");
     const savedAlarms = localStorage.getItem("nonstop_challenger_alarms");
     const savedRates = localStorage.getItem("nonstop_challenger_rates");
-
-    if (savedEvents) {
-      try {
-        const parsed = JSON.parse(savedEvents);
-        setEvents(Array.isArray(parsed) ? parsed : initialMockEvents);
-      } catch (e) {
-        setEvents(initialMockEvents);
-      }
-    } else {
-      setEvents(initialMockEvents);
-    }
 
     if (savedSplits) {
       try {
@@ -328,18 +357,19 @@ export default function Dashboard() {
     }
   }, []);
 
-  // 儲存輔助
+  // 儲存輔助：events 現在同步到 Supabase，其餘設定仍暫留在 localStorage
   const saveEventsToStorage = (newEvents: ShowEvent[], takeSnapshot = true) => {
     if (takeSnapshot) {
       setPreviousEvents([...events]);
       setPreviousRoles({ ...eventRoles });
       setPreviousOffsets({ ...eventOffsets });
     }
+    const oldEvents = events;
     setEvents(newEvents);
-    localStorage.setItem(
-      "nonstop_challenger_events",
-      JSON.stringify(newEvents)
-    );
+    syncEvents(newEvents, oldEvents).catch((err) => {
+      console.error("同步雲端資料失敗：", err);
+      setAiNotice("⚠️ 資料同步到雲端失敗，請檢查網路連線後重試一次。");
+    });
   };
 
   const saveChecklistToStorage = (newList: ChecklistItem[]) => {
@@ -463,10 +493,10 @@ export default function Dashboard() {
     const currentOffsets = { ...eventOffsets };
 
     setEvents(previousEvents);
-    localStorage.setItem(
-      "nonstop_challenger_events",
-      JSON.stringify(previousEvents)
-    );
+    syncEvents(previousEvents, currentEvents).catch((err) => {
+      console.error("復原同步雲端失敗：", err);
+      setAiNotice("⚠️ 復原已套用在畫面上，但同步到雲端失敗，請檢查網路連線。");
+    });
 
     if (previousSplits) {
       setTicketSplits(previousSplits);
@@ -717,9 +747,7 @@ export default function Dashboard() {
     const looksLikeUrl =
       text.startsWith("http://") ||
       text.startsWith("https://") ||
-      /^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(
-        cleanInput.split(/\s+/)[0]
-      );
+      /^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(cleanInput.split(/\s+/)[0]);
 
     if (looksLikeUrl) {
       // 若使用者沒帶協議，統一補上 https:// 以確保後續連結可正常開啟、平台比對邏輯一致
@@ -781,12 +809,13 @@ export default function Dashboard() {
       setPreviousSplits({ ...ticketSplits });
       setPreviousOffsets({ ...eventOffsets });
 
+      const oldEventsSnapshot = events;
       const finalEvents = [newUrlEvent, ...events];
       setEvents(finalEvents);
-      localStorage.setItem(
-        "nonstop_challenger_events",
-        JSON.stringify(finalEvents)
-      );
+      syncEvents(finalEvents, oldEventsSnapshot).catch((err) => {
+        console.error("同步雲端失敗：", err);
+        setAiNotice("⚠️ 卡片已建立在畫面上，但同步到雲端失敗，請檢查網路連線。");
+      });
 
       setAiNotice(
         isKnownPlatform
@@ -855,12 +884,13 @@ export default function Dashboard() {
         setPreviousSplits({ ...ticketSplits });
         setPreviousOffsets({ ...eventOffsets });
 
+        const oldEventsSnapshot = events;
         const finalEvents = [newEvent, ...events];
         setEvents(finalEvents);
-        localStorage.setItem(
-          "nonstop_challenger_events",
-          JSON.stringify(finalEvents)
-        );
+        syncEvents(finalEvents, oldEventsSnapshot).catch((err) => {
+          console.error("同步雲端失敗：", err);
+          setAiNotice("⚠️ 卡片已建立在畫面上，但同步到雲端失敗，請檢查網路連線。");
+        });
 
         const updatedSplits = {
           ...ticketSplits,
@@ -936,11 +966,12 @@ export default function Dashboard() {
       setPreviousSplits({ ...ticketSplits });
       setPreviousOffsets({ ...eventOffsets });
 
+      const oldEventsSnapshot = events;
       setEvents(updatedEvents);
-      localStorage.setItem(
-        "nonstop_challenger_events",
-        JSON.stringify(updatedEvents)
-      );
+      syncEvents(updatedEvents, oldEventsSnapshot).catch((err) => {
+        console.error("同步雲端失敗：", err);
+        setAiNotice("⚠️ 狀態已更新在畫面上，但同步到雲端失敗，請檢查網路連線。");
+      });
       setAiNotice(`⚡ AI 語意分析連動成功：\n${noticeMessages.join("\n")}`);
       setAiInput("");
     } else {
@@ -993,8 +1024,13 @@ export default function Dashboard() {
       setPreviousRoles({ ...eventRoles });
       setPreviousOffsets({ ...eventOffsets });
 
+      const oldEventsSnapshot = events;
       localStorage.clear();
       setEvents(initialMockEvents);
+      syncEvents(initialMockEvents, oldEventsSnapshot).catch((err) => {
+        console.error("重設雲端資料失敗：", err);
+        setAiNotice("⚠️ 畫面已重設，但同步到雲端失敗，請檢查網路連線。");
+      });
       setTicketSplits({ "event-yuuri-004": { total: 4, split: 2 } });
       setEventOffsets({ "event-yuuri-004": 9, "event-fujii-kaze-002": 8 });
       setEventRoles({});
@@ -1123,15 +1159,79 @@ export default function Dashboard() {
     })
     // 依演出日期由近到遠排序，避免新增/匯入後卡片順序與實際時間線脫節
     .sort((a, b) => {
-      const offsetA =
-        eventOffsets[a.id] !== undefined ? eventOffsets[a.id] : browserOffset;
-      const offsetB =
-        eventOffsets[b.id] !== undefined ? eventOffsets[b.id] : browserOffset;
-      return (
-        getUtcTimestamp(a.showDate, offsetA) -
-        getUtcTimestamp(b.showDate, offsetB)
-      );
+      const offsetA = eventOffsets[a.id] !== undefined ? eventOffsets[a.id] : browserOffset;
+      const offsetB = eventOffsets[b.id] !== undefined ? eventOffsets[b.id] : browserOffset;
+      return getUtcTimestamp(a.showDate, offsetA) - getUtcTimestamp(b.showDate, offsetB);
     });
+
+  const handleSendLoginLink = async () => {
+    if (!authEmail.trim()) return;
+    setAuthStatus("sending");
+    setAuthErrorMsg("");
+    try {
+      await sendLoginLink(authEmail.trim());
+      setAuthStatus("sent");
+    } catch (err: any) {
+      setAuthStatus("error");
+      setAuthErrorMsg(err?.message || "發送失敗，請稍後再試。");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch (err) {
+      console.error("登出失敗：", err);
+    }
+  };
+
+  // 正在確認是否已登入，先顯示簡單的載入畫面
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-sm">
+        正在確認登入狀態...
+      </div>
+    );
+  }
+
+  // 尚未登入：顯示 Email 登入表單（Magic Link，不需要密碼）
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-sm space-y-4 shadow-xl">
+          <h1 className="text-lg font-semibold text-slate-100">
+            登入 Nonstop Challenger
+          </h1>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            輸入 Email，我們會寄一組登入連結到你的信箱，點擊連結即可登入（不需要密碼）。登入後資料會存在雲端，換裝置也能看到。
+          </p>
+          <input
+            type="email"
+            value={authEmail}
+            onChange={(e) => setAuthEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSendLoginLink()}
+            placeholder="you@example.com"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 transition-colors"
+          />
+          <button
+            onClick={handleSendLoginLink}
+            disabled={authStatus === "sending"}
+            className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-all active:scale-95"
+          >
+            {authStatus === "sending" ? "傳送中..." : "傳送登入連結"}
+          </button>
+          {authStatus === "sent" && (
+            <p className="text-xs text-emerald-400">
+              📩 已寄出登入連結，請到信箱點擊連結完成登入（記得看一下垃圾郵件）。
+            </p>
+          )}
+          {authStatus === "error" && (
+            <p className="text-xs text-rose-400">❌ {authErrorMsg}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 pb-16 selection:bg-purple-500 selection:text-white">
@@ -1155,6 +1255,17 @@ export default function Dashboard() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+          {/* 帳號資訊 / 登出 */}
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg">
+            <span className="truncate max-w-[140px]">{user.email}</span>
+            <button
+              onClick={handleSignOut}
+              className="text-slate-500 hover:text-rose-400 transition-colors underline decoration-dotted"
+            >
+              登出
+            </button>
+          </div>
+
           {/* 語系切換 */}
           <button
             onClick={() => setLang(lang === "zh" ? "en" : "zh")}
