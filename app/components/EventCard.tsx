@@ -31,6 +31,7 @@ import {
   inputValueToShowDate,
   STATUS_BADGES,
   CURRENCY_TO_TWD,
+  convertToTwd,
 } from "../lib/helpers";
 
 // 幣別選單的選項，直接沿用匯率對照表裡有的幣別
@@ -675,29 +676,43 @@ export default function EventCard({
 
             {/* 單張票價：因為官網常常有多種票價可選，這裡沒辦法自動偵測，需要手動輸入 */}
             <div
-              className="flex items-center gap-1.5 text-[10px] text-slate-400 pt-1"
+              className="space-y-1 pt-1"
               onClick={(e) => e.stopPropagation()}
             >
-              {lang === "zh" ? "單張票價" : "Unit price"}
-              <input
-                type="number"
-                min={0}
-                value={draftUnitPrice}
-                onChange={(e) => setDraftUnitPrice(e.target.value)}
-                className="w-20 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-              />
-              <span className="text-slate-600">{currency}</span>
-              <button
-                onClick={() => {
-                  const unitPrice = parseFloat(draftUnitPrice);
-                  if (!isNaN(unitPrice) && unitPrice >= 0) {
-                    onCostChange(event.id, unitPrice * splitInfo.total);
-                  }
-                }}
-                className="text-indigo-400 hover:text-indigo-300 font-medium ml-1"
-              >
-                {lang === "zh" ? "套用×總票數" : "Apply × tickets"}
-              </button>
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                {lang === "zh" ? "單張票價" : "Unit price"}
+                <input
+                  type="number"
+                  min={0}
+                  value={draftUnitPrice}
+                  onChange={(e) => setDraftUnitPrice(e.target.value)}
+                  onBlur={() => {
+                    const unitPrice = parseFloat(draftUnitPrice);
+                    if (!isNaN(unitPrice) && unitPrice >= 0) {
+                      onCostChange(event.id, unitPrice * splitInfo.total);
+                    }
+                  }}
+                  className="w-20 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-slate-600">{currency}</span>
+              </div>
+              {/* 即時顯示：單價 × 總票數 算出來的總價，離開輸入框時會自動套用到卡片總價 */}
+              <p className="text-[10px] text-slate-500">
+                {lang === "zh" ? "總價（單價 × 總票數）：" : "Total (unit × qty): "}
+                <span className="text-indigo-300 font-mono">
+                  {(parseFloat(draftUnitPrice) || 0) * splitInfo.total}{" "}
+                  {currency}
+                </span>
+                <span className="text-slate-600">
+                  {" "}
+                  ≈ {formatAmount(
+                    convertToTwd(
+                      (parseFloat(draftUnitPrice) || 0) * splitInfo.total,
+                      currency
+                    )
+                  )}
+                </span>
+              </p>
             </div>
 
             <div className="flex justify-between items-center pt-1.5 border-t border-slate-800/80 text-[11px]">
