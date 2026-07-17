@@ -22,7 +22,6 @@ interface UseAiInputProcessorParams {
   setEventOffsets: (offsets: Record<string, number>) => void;
   canUndo: boolean;
   pushHistory: () => void;
-  setReleasedAmount: (amount: number | null) => void;
   triggerUndo: () => void;
   setAiNotice: (msg: string) => void;
   syncSettingsToCloud: (overrides: {
@@ -40,7 +39,6 @@ export function useAiInputProcessor({
   setEventOffsets,
   canUndo,
   pushHistory,
-  setReleasedAmount,
   triggerUndo,
   setAiNotice,
   syncSettingsToCloud,
@@ -314,79 +312,11 @@ export function useAiInputProcessor({
       }
     }
 
-    // 智慧語意狀態更新系統
-    let updatedEvents = [...events];
-    const noticeMessages: string[] = [];
-
-    const isNegative =
-      text.includes("沒") ||
-      text.includes("無") ||
-      text.includes("不") ||
-      text.includes("未") ||
-      text.includes("敗") ||
-      text.includes("落選");
-
-    if (text.includes("優里") || text.includes("yuuri")) {
-      if (
-        (text.includes("中選") ||
-          text.includes("買到") ||
-          text.includes("中票")) &&
-        !isNegative
-      ) {
-        updatedEvents = updatedEvents.map((event) =>
-          event.id === "event-yuuri-004"
-            ? { ...event, statusLifecycle: "purchased" }
-            : event
-        );
-        noticeMessages.push(
-          "🎟️ 已將【優里】狀態更新為【購入完成】！資金已從預備金正式扣減。"
-        );
-      } else if (
-        isNegative &&
-        (text.includes("沒") ||
-          text.includes("落選") ||
-          text.includes("未中選"))
-      ) {
-        const targetEvent = events.find((e) => e.id === "event-yuuri-004");
-        if (
-          targetEvent &&
-          (targetEvent.statusLifecycle === "applied_drawing" ||
-            targetEvent.statusLifecycle === "waiting_list")
-        ) {
-          const cost = targetEvent.expenses.reduce(
-            (sum, exp) => sum + exp.cost,
-            0
-          );
-          setReleasedAmount(cost);
-          setTimeout(() => setReleasedAmount(null), 5000);
-        }
-
-        updatedEvents = updatedEvents.map((event) =>
-          event.id === "event-yuuri-004"
-            ? { ...event, statusLifecycle: "ended_no_ticket" }
-            : event
-        );
-        noticeMessages.push("😢 偵測到優里落選，已設為【遺憾落選】。");
-      }
-    }
-
-    if (noticeMessages.length > 0) {
-      pushHistory();
-
-      const oldEventsSnapshot = events;
-      setEvents(updatedEvents);
-      syncEvents(updatedEvents, oldEventsSnapshot).catch((err) => {
-        console.error("同步雲端失敗：", err);
-        setAiNotice("⚠️ 狀態已更新在畫面上，但同步到雲端失敗，請檢查網路連線。");
-      });
-      setAiNotice(`⚡ AI 語意分析連動成功：\n${noticeMessages.join("\n")}`);
-      setAiInput("");
-    } else {
-      setAiNotice(
-        `💡 系統已收到您的感測指令：\n"${cleanInput}"\n※ 貼上售票網址、或使用「新建:」公式，按下 Enter 即可自動建構！`
-      );
-      setAiInput("");
-    }
+    // 沒有符合任何已知指令格式，給予提示
+    setAiNotice(
+      `💡 系統已收到您的感測指令：\n"${cleanInput}"\n※ 貼上售票網址、或使用「新建:」公式，按下 Enter 即可自動建構！`
+    );
+    setAiInput("");
   };
 
   const handleKeyDownInput = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
