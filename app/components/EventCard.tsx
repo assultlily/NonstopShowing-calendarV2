@@ -30,7 +30,11 @@ import {
   showDateToInputValue,
   inputValueToShowDate,
   STATUS_BADGES,
+  CURRENCY_TO_TWD,
 } from "../lib/helpers";
+
+// 幣別選單的選項，直接沿用匯率對照表裡有的幣別
+const CURRENCY_OPTIONS = Object.keys(CURRENCY_TO_TWD);
 
 interface EventCardProps {
   event: ShowEvent;
@@ -47,6 +51,9 @@ interface EventCardProps {
   availableOffsets: number[];
   alarmConfig: AlarmConfig;
   totalCost: number;
+  nativeCost: number;
+  currency: string;
+  onCurrencyChange: (eventId: string, newCurrency: string) => void;
   splitInfo: { total: number; split: number };
   onSplitChange: (
     eventId: string,
@@ -85,6 +92,9 @@ export default function EventCard({
   availableOffsets,
   alarmConfig,
   totalCost,
+  nativeCost,
+  currency,
+  onCurrencyChange,
   splitInfo,
   onSplitChange,
   formatAmount,
@@ -108,7 +118,13 @@ export default function EventCard({
     showDateToInputValue(event.showDate)
   );
   const [isEditingCost, setIsEditingCost] = useState(false);
-  const [draftCost, setDraftCost] = useState(() => String(totalCost));
+  const [draftCost, setDraftCost] = useState(() => String(nativeCost));
+  const [draftCurrency, setDraftCurrency] = useState(currency);
+  const [draftUnitPrice, setDraftUnitPrice] = useState(() =>
+    splitInfo.total > 0
+      ? String(Math.round(nativeCost / splitInfo.total))
+      : "0"
+  );
 
   const handleSaveDate = () => {
     if (draftDate) {
@@ -126,12 +142,16 @@ export default function EventCard({
     const parsed = parseFloat(draftCost);
     if (!isNaN(parsed) && parsed >= 0) {
       onCostChange(event.id, parsed);
+      if (draftCurrency !== currency) {
+        onCurrencyChange(event.id, draftCurrency);
+      }
     }
     setIsEditingCost(false);
   };
 
   const handleCancelCost = () => {
-    setDraftCost(String(totalCost));
+    setDraftCost(String(nativeCost));
+    setDraftCurrency(currency);
     setIsEditingCost(false);
   };
 
@@ -254,7 +274,7 @@ export default function EventCard({
             </div>
           </div>
 
-          {/* 金額調整（同一幣值） */}
+          {/* 金額調整（含幣別） */}
           <div className="flex justify-between items-center pt-1 border-t border-slate-950/80 text-amber-400 font-mono">
             <span>
               💰 {lang === "zh" ? "預估規費/票面價" : "Est. Cost"}
@@ -264,12 +284,23 @@ export default function EventCard({
                 className="flex items-center gap-1"
                 onClick={(e) => e.stopPropagation()}
               >
+                <select
+                  value={draftCurrency}
+                  onChange={(e) => setDraftCurrency(e.target.value)}
+                  className="bg-slate-900 border border-amber-500 rounded px-1 py-0.5 text-[10px] text-slate-200 font-mono focus:outline-none"
+                >
+                  {CURRENCY_OPTIONS.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="number"
                   min="0"
                   value={draftCost}
                   onChange={(e) => setDraftCost(e.target.value)}
-                  className="w-20 bg-slate-900 border border-amber-500 rounded px-1 py-0.5 text-[10px] text-slate-200 font-mono focus:outline-none"
+                  className="w-16 bg-slate-900 border border-amber-500 rounded px-1 py-0.5 text-[10px] text-slate-200 font-mono focus:outline-none"
                 />
                 <button
                   onClick={handleSaveCost}
@@ -289,10 +320,16 @@ export default function EventCard({
             ) : (
               <span className="flex items-center gap-1">
                 {formatAmount(totalCost)}
+                {currency !== "TWD" && (
+                  <span className="text-[9px] text-amber-600">
+                    ({currency} {nativeCost.toLocaleString()})
+                  </span>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setDraftCost(String(totalCost));
+                    setDraftCost(String(nativeCost));
+                    setDraftCurrency(currency);
                     setIsEditingCost(true);
                   }}
                   className="text-slate-500 hover:text-amber-300"
@@ -601,7 +638,7 @@ export default function EventCard({
               <Users size={12} className="text-indigo-400" />
               {lang === "zh" ? "分票／費用分攤" : "Ticket Split"}
             </span>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
                 {lang === "zh" ? "總票數" : "Total tickets"}
                 <input
@@ -635,6 +672,34 @@ export default function EventCard({
                 />
               </label>
             </div>
+
+            {/* 單張票價：因為官網常常有多種票價可選，這裡沒辦法自動偵測，需要手動輸入 */}
+            <div
+              className="flex items-center gap-1.5 text-[10px] text-slate-400 pt-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {lang === "zh" ? "單張票價" : "Unit price"}
+              <input
+                type="number"
+                min={0}
+                value={draftUnitPrice}
+                onChange={(e) => setDraftUnitPrice(e.target.value)}
+                className="w-20 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[11px] text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+              />
+              <span className="text-slate-600">{currency}</span>
+              <button
+                onClick={() => {
+                  const unitPrice = parseFloat(draftUnitPrice);
+                  if (!isNaN(unitPrice) && unitPrice >= 0) {
+                    onCostChange(event.id, unitPrice * splitInfo.total);
+                  }
+                }}
+                className="text-indigo-400 hover:text-indigo-300 font-medium ml-1"
+              >
+                {lang === "zh" ? "套用×總票數" : "Apply × tickets"}
+              </button>
+            </div>
+
             <div className="flex justify-between items-center pt-1.5 border-t border-slate-800/80 text-[11px]">
               <span className="text-slate-400">
                 {lang === "zh" ? "每人應付" : "Per person"}
