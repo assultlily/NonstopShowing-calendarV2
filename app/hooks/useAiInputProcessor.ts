@@ -117,118 +117,127 @@ export function useAiInputProcessor({
           err instanceof Error ? err.message : "讀取網頁內容失敗";
       }
 
-      // 有抓到真實標題就優先使用，抓不到才退回用網址路徑猜
-      let guessedTitle: string;
-      if (realTitle) {
-        guessedTitle =
-          realTitle.length > 40 ? realTitle.slice(0, 37) + "..." : realTitle;
-      } else {
-        const urlParts = cleanInput.split("/");
-        guessedTitle =
-          urlParts[urlParts.length - 1] ||
-          urlParts[urlParts.length - 2] ||
-          "未命名網址匯入活動";
-        if (guessedTitle.length > 25)
-          guessedTitle = guessedTitle.substring(0, 22) + "...";
-        guessedTitle = `🌐 網址：${guessedTitle.toUpperCase()}`;
-      }
+      try {
+        // 有抓到真實標題就優先使用，抓不到才退回用網址路徑猜
+        let guessedTitle: string;
+        if (realTitle) {
+          guessedTitle =
+            realTitle.length > 40 ? realTitle.slice(0, 37) + "..." : realTitle;
+        } else {
+          const urlParts = cleanInput.split("/");
+          guessedTitle =
+            urlParts[urlParts.length - 1] ||
+            urlParts[urlParts.length - 2] ||
+            "未命名網址匯入活動";
+          if (guessedTitle.length > 25)
+            guessedTitle = guessedTitle.substring(0, 22) + "...";
+          guessedTitle = `🌐 網址：${guessedTitle.toUpperCase()}`;
+        }
 
-      // 日期優先順序：① 網頁提供的結構化資料（最準確）② 從描述文字用規則猜 ③ 都抓不到就用預設值
-      const textGuessedDate = realDescription
-        ? extractDateFromText(realDescription)
-        : null;
-      const extractedDate = structuredDate || textGuessedDate;
-      const showDate = extractedDate || "2026-12-31 19:00";
+        // 日期優先順序：① 網頁提供的結構化資料（最準確）② 從描述文字用規則猜 ③ 都抓不到就用預設值
+        const textGuessedDate = realDescription
+          ? extractDateFromText(realDescription)
+          : null;
+        const extractedDate = structuredDate || textGuessedDate;
+        const showDate = extractedDate || "2026-12-31 19:00";
 
-      // 時區優先順序：① 平台本身只服務單一地區（最準確，例如台灣/日本售票網）
-      // ② 網頁地址資料判斷出的國家 ③ 都沒有就不設定，畫面會退回使用瀏覽器自己的時區
-      const countryOffset = getOffsetFromCountry(venueCountry);
-      const guessedOffset =
-        match?.defaultOffset !== undefined && match?.defaultOffset !== null
-          ? match.defaultOffset
-          : countryOffset;
+        // 時區優先順序：① 平台本身只服務單一地區（最準確，例如台灣/日本售票網）
+        // ② 網頁地址資料判斷出的國家 ③ 都沒有就不設定，畫面會退回使用瀏覽器自己的時區
+        const countryOffset = getOffsetFromCountry(venueCountry);
+        const guessedOffset =
+          match?.defaultOffset !== undefined && match?.defaultOffset !== null
+            ? match.defaultOffset
+            : countryOffset;
 
-      const statusNote = fetchFailed
-        ? `⚠️ ${fetchErrorMessage}，已建立基本卡片，請手動補齊資訊。`
-        : structuredDate
-        ? "✅ 已從網頁的活動資訊中精確抓到日期，請展開卡片確認是否正確。"
-        : textGuessedDate
-        ? "✅ 已從網頁內容中偵測到日期，請展開卡片確認是否正確。"
-        : "⚠️ 已抓到網頁標題，但沒有偵測到明確日期，請展開卡片點擊時間欄位手動設定。";
+        const statusNote = fetchFailed
+          ? `⚠️ ${fetchErrorMessage}，已建立基本卡片，請手動補齊資訊。`
+          : structuredDate
+          ? "✅ 已從網頁的活動資訊中精確抓到日期，請展開卡片確認是否正確。"
+          : textGuessedDate
+          ? "✅ 已從網頁內容中偵測到日期，請展開卡片確認是否正確。"
+          : "⚠️ 已抓到網頁標題，但沒有偵測到明確日期，請展開卡片點擊時間欄位手動設定。";
 
-      const timezoneNote =
-        guessedOffset !== null
-          ? `\n🌍 已自動設定時區為 GMT${guessedOffset >= 0 ? "+" : ""}${guessedOffset}，請確認是否正確。`
-          : "\n⚠️ 無法自動判斷場館時區，請展開卡片手動設定。";
+        const timezoneNote =
+          guessedOffset !== null
+            ? `\n🌍 已自動設定時區為 GMT${guessedOffset >= 0 ? "+" : ""}${guessedOffset}，請確認是否正確。`
+            : "\n⚠️ 無法自動判斷場館時區，請展開卡片手動設定。";
 
-      const fallbackNotes = `【📬 網址自動化偵測建立】\n${statusNote}${timezoneNote}\n原始網址：${cleanInput}\n${
-        realDescription ? `\n網頁描述：${realDescription.slice(0, 200)}` : ""
-      }\n\n請展開本卡片，自由修改隨手備忘、設定時區、或手動更動確切的演出時間。`;
+        const fallbackNotes = `【📬 網址自動化偵測建立】\n${statusNote}${timezoneNote}\n原始網址：${cleanInput}\n${
+          realDescription ? `\n網頁描述：${realDescription.slice(0, 200)}` : ""
+        }\n\n請展開本卡片，自由修改隨手備忘、設定時區、或手動更動確切的演出時間。`;
 
-      const newUrlEvent: ShowEvent = {
-        id: `url-event-${Date.now()}`,
-        title: guessedTitle,
-        artist: "隨網址自動辨識建構",
-        type: "official",
-        location:
-          venueCountry ||
-          (guessedOffset !== null
-            ? "海外現地會場"
-            : "未指定地點 (請展開本卡片手動微調)"),
-        showDate,
-        agency: agencyGuess,
-        sourceUrl: normalizedUrl,
-        statusLifecycle: "watchlist",
-        userNotes: fallbackNotes,
-        expenses: [{ item: "預估票規費項目", cost: 0 }],
-        ticketStages: [
-          {
-            stageName: "網址情報源已鎖定",
-            saleTime: "即日起",
-            status: "active",
-          },
-          {
-            stageName: "使用者自訂管制點",
-            saleTime: `${showDate.split(" ")[0]} 12:00`,
-            status: "active",
-          },
-        ],
-        fanEvents: [],
-        curatedShops: [],
-      };
-
-      addNewEvent(newUrlEvent);
-
-      // 有猜到時區的話，直接帶入，避免顯示時誤用瀏覽器自己的時區
-      if (guessedOffset !== null) {
-        const updatedOffsets = {
-          ...eventOffsets,
-          [newUrlEvent.id]: guessedOffset,
+        const newUrlEvent: ShowEvent = {
+          id: `url-event-${Date.now()}`,
+          title: guessedTitle,
+          artist: "隨網址自動辨識建構",
+          type: "official",
+          location:
+            venueCountry ||
+            (guessedOffset !== null
+              ? "海外現地會場"
+              : "未指定地點 (請展開本卡片手動微調)"),
+          showDate,
+          agency: agencyGuess,
+          sourceUrl: normalizedUrl,
+          statusLifecycle: "watchlist",
+          userNotes: fallbackNotes,
+          expenses: [{ item: "預估票規費項目", cost: 0 }],
+          ticketStages: [
+            {
+              stageName: "網址情報源已鎖定",
+              saleTime: "即日起",
+              status: "active",
+            },
+            {
+              stageName: "使用者自訂管制點",
+              saleTime: `${showDate.split(" ")[0]} 12:00`,
+              status: "active",
+            },
+          ],
+          fanEvents: [],
+          curatedShops: [],
         };
-        setEventOffsets(updatedOffsets);
-        localStorage.setItem(
-          "nonstop_challenger_offsets",
-          JSON.stringify(updatedOffsets)
+
+        addNewEvent(newUrlEvent);
+
+        // 有猜到時區的話，直接帶入，避免顯示時誤用瀏覽器自己的時區
+        if (guessedOffset !== null) {
+          const updatedOffsets = {
+            ...eventOffsets,
+            [newUrlEvent.id]: guessedOffset,
+          };
+          setEventOffsets(updatedOffsets);
+          localStorage.setItem(
+            "nonstop_challenger_offsets",
+            JSON.stringify(updatedOffsets)
+          );
+          syncSettingsToCloud({ eventOffsets: updatedOffsets });
+        }
+
+        const dateStatusText = extractedDate
+          ? "日期已自動偵測"
+          : "⚠️ 未偵測到日期，請展開卡片點擊時間欄位手動設定";
+
+        setAiNotice(
+          fetchFailed
+            ? `⚠️ [網址已匯入，但讀取失敗]：\n${fetchErrorMessage}\n已建立基本卡片，請手動補上正確資訊。`
+            : isKnownPlatform
+            ? `🎉 [網址自動辨識成功]：\n系統已為此連結【${agencyGuess}】建構專屬卡片！\n標題${
+                realTitle ? "已自動抓取" : "未抓到，請手動確認"
+              }，${dateStatusText}。`
+            : `ℹ️ [通用網址已匯入]：\n已為您建置連結專案，請手動確認售票平台。${dateStatusText}。`
         );
-        syncSettingsToCloud({ eventOffsets: updatedOffsets });
+      } catch (err) {
+        // 保險機制：不管上面哪一步意外出錯，都要讓使用者知道，而不是讓提示訊息永遠卡在「讀取中」
+        console.error("建立卡片時發生未預期的錯誤：", err);
+        setAiNotice(
+          "⚠️ 建立卡片時發生未預期的錯誤，畫面上的卡片內容可能不完整，請手動確認。"
+        );
+      } finally {
+        // 不管成功、失敗、或中途出錯，都要確保「讀取中」狀態一定會被清除
+        setIsProcessing(false);
+        setAiInput("");
       }
-
-      setIsProcessing(false);
-
-      const dateStatusText = extractedDate
-        ? "日期已自動偵測"
-        : "⚠️ 未偵測到日期，請展開卡片點擊時間欄位手動設定";
-
-      setAiNotice(
-        fetchFailed
-          ? `⚠️ [網址已匯入，但讀取失敗]：\n${fetchErrorMessage}\n已建立基本卡片，請手動補上正確資訊。`
-          : isKnownPlatform
-          ? `🎉 [網址自動辨識成功]：\n系統已為此連結【${agencyGuess}】建構專屬卡片！\n標題${
-              realTitle ? "已自動抓取" : "未抓到，請手動確認"
-            }，${dateStatusText}。`
-          : `ℹ️ [通用網址已匯入]：\n已為您建置連結專案，請手動確認售票平台。${dateStatusText}。`
-      );
-      setAiInput("");
       return;
     }
 
