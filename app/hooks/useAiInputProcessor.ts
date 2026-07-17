@@ -15,13 +15,14 @@ interface UseAiInputProcessorParams {
   ticketSplits: Record<string, TicketSplit>;
   setTicketSplits: (splits: Record<string, TicketSplit>) => void;
   eventOffsets: Record<string, number>;
-  previousEvents: ShowEvent[] | null;
-  setPreviousEvents: (events: ShowEvent[]) => void;
-  setPreviousSplits: (splits: Record<string, TicketSplit>) => void;
-  setPreviousOffsets: (offsets: Record<string, number>) => void;
+  canUndo: boolean;
+  pushHistory: () => void;
   setReleasedAmount: (amount: number | null) => void;
   triggerUndo: () => void;
   setAiNotice: (msg: string) => void;
+  syncSettingsToCloud: (overrides: {
+    ticketSplits?: Record<string, TicketSplit>;
+  }) => void;
 }
 
 export function useAiInputProcessor({
@@ -30,22 +31,19 @@ export function useAiInputProcessor({
   ticketSplits,
   setTicketSplits,
   eventOffsets,
-  previousEvents,
-  setPreviousEvents,
-  setPreviousSplits,
-  setPreviousOffsets,
+  canUndo,
+  pushHistory,
   setReleasedAmount,
   triggerUndo,
   setAiNotice,
+  syncSettingsToCloud,
 }: UseAiInputProcessorParams) {
   const [aiInput, setAiInput] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
 
   // 新增卡片時共用的快照與雲端同步邏輯
   const addNewEvent = (newEvent: ShowEvent) => {
-    setPreviousEvents([...events]);
-    setPreviousSplits({ ...ticketSplits });
-    setPreviousOffsets({ ...eventOffsets });
+    pushHistory();
 
     const oldEventsSnapshot = events;
     const finalEvents = [newEvent, ...events];
@@ -200,7 +198,7 @@ export function useAiInputProcessor({
 
     // 復原指令
     if (text === "復原" || text === "上一步" || text === "undo") {
-      if (previousEvents) {
+      if (canUndo) {
         triggerUndo();
         setAiInput("");
       } else {
@@ -263,6 +261,7 @@ export function useAiInputProcessor({
           "nonstop_challenger_splits",
           JSON.stringify(updatedSplits)
         );
+        syncSettingsToCloud({ ticketSplits: updatedSplits });
 
         setAiNotice(`✨ [AI 動態建構成功]：\n已成功新增【${title}】！`);
         setAiInput("");
@@ -327,9 +326,7 @@ export function useAiInputProcessor({
     }
 
     if (noticeMessages.length > 0) {
-      setPreviousEvents([...events]);
-      setPreviousSplits({ ...ticketSplits });
-      setPreviousOffsets({ ...eventOffsets });
+      pushHistory();
 
       const oldEventsSnapshot = events;
       setEvents(updatedEvents);
