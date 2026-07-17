@@ -33,6 +33,64 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&nbsp;/g, " ");
 }
 
+// 遞迴在 JSON-LD 資料裡尋找 @type 是 Event（或包含 Event）的物件
+function findEventNode(node: unknown): Record<string, unknown> | null {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findEventNode(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (node && typeof node === "object") {
+    const obj = node as Record<string, unknown>;
+    const type = obj["@type"];
+    const typeStr = Array.isArray(type) ? type.join(",") : String(type || "");
+    if (typeStr.toLowerCase().includes("event")) {
+      return obj;
+    }
+    // 有些網站會把資料包在 @graph 陣列裡
+    if (obj["@graph"]) {
+      const found = findEventNode(obj["@graph"]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// 抓網頁裡 <script type="application/ld+json"> 區塊，嘗試找出 schema.org Event 的 startDate
+// 這是網站主動提供給搜尋引擎（例如 Google）看的結構化資料，格式固定，比從文字裡用規則猜日期準確很多
+function extractEventStartDate(html: string): string | null {
+  const scriptRegex =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = scriptRegex.exec(html)) !== null) {
+    try {
+      const json = JSON.parse(match[1].trim());
+      const eventNode = findEventNode(json);
+      const startDate = eventNode?.startDate;
+      if (typeof startDate === "string" && startDate.length >= 10) {
+        return startDate;
+      }
+    } catch {
+      // 這段 JSON-LD 格式不合法或不是我們要的結構，略過繼續找下一段
+      continue;
+    }
+  }
+  return null;
+}
+
+// 把 ISO 8601 格式（例如 2026-12-31T19:00:00+09:00）轉成專案內部使用的 "YYYY-MM-DD HH:mm" 格式
+function normalizeIsoDate(isoDate: string): string | null {
+  const date = new Date(isoDate);
+  if (isNaN(date.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -102,10 +160,14 @@ export async function POST(req: NextRequest) {
       ? decodeHtmlEntities(titleTagMatch[1].trim())
       : null;
 
+    const rawStartDate = extractEventStartDate(html);
+    const eventDate = rawStartDate ? normalizeIsoDate(rawStartDate) : null;
+
     return NextResponse.json({
       title: ogTitle || titleTag || null,
       description: ogDescription || null,
       image: ogImage || null,
+      eventDate,
     });
   } catch (err) {
     console.error("parse-url API error:", err);
