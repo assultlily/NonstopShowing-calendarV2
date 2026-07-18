@@ -20,6 +20,7 @@ type EventRow = {
   curated_shops: ShowEvent["curatedShops"];
   deleted_at: string | null;
   currency: string | null;
+  alternate_dates: string[] | null;
 };
 
 function rowToEvent(row: EventRow): ShowEvent {
@@ -30,6 +31,7 @@ function rowToEvent(row: EventRow): ShowEvent {
     type: row.type as ShowEvent["type"],
     location: row.location,
     showDate: row.show_date,
+    alternateDates: row.alternate_dates || [],
     agency: row.agency,
     sourceUrl: row.source_url,
     statusLifecycle: row.status_lifecycle as ShowEvent["statusLifecycle"],
@@ -51,6 +53,7 @@ function eventToRow(event: ShowEvent): Omit<EventRow, "user_id"> {
     type: event.type,
     location: event.location,
     show_date: event.showDate,
+    alternate_dates: event.alternateDates || [],
     agency: event.agency,
     source_url: event.sourceUrl,
     status_lifecycle: event.statusLifecycle,
