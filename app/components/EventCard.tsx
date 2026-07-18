@@ -18,6 +18,8 @@ import {
   X,
   Trash2,
   Users,
+  CalendarDays,
+  Plus,
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
@@ -26,7 +28,6 @@ import {
   getNavigationUrl,
   getEmbedMapIframeUrl,
   formatGmtLabel,
-  getGoogleCalendarLink,
   showDateToInputValue,
   inputValueToShowDate,
   STATUS_BADGES,
@@ -74,6 +75,10 @@ interface EventCardProps {
   ) => void;
   onNotesChange: (eventId: string, notes: string) => void;
   onDateChange: (eventId: string, newShowDate: string) => void;
+  onAddAlternateDate: (eventId: string, newDate: string) => void;
+  onRemoveAlternateDate: (eventId: string, dateToRemove: string) => void;
+  onSelectAlternateDate: (eventId: string, selectedDate: string) => void;
+  onLocationChange: (eventId: string, newLocation: string) => void;
   onCostChange: (eventId: string, newTotalCost: number) => void;
   onDelete: (eventId: string) => void;
 }
@@ -108,6 +113,10 @@ export default function EventCard({
   onStatusChange,
   onNotesChange,
   onDateChange,
+  onAddAlternateDate,
+  onRemoveAlternateDate,
+  onSelectAlternateDate,
+  onLocationChange,
   onCostChange,
   onDelete,
 }: EventCardProps) {
@@ -126,6 +135,7 @@ export default function EventCard({
       ? String(Math.round(nativeCost / splitInfo.total))
       : "0"
   );
+  const [draftAlternateDate, setDraftAlternateDate] = useState("");
 
   const handleSaveDate = () => {
     if (draftDate) {
@@ -156,6 +166,25 @@ export default function EventCard({
     setIsEditingCost(false);
   };
 
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [draftLocation, setDraftLocation] = useState(
+    event.location.startsWith("未指定地點") ? "" : event.location
+  );
+
+  const handleSaveLocation = () => {
+    if (draftLocation.trim()) {
+      onLocationChange(event.id, draftLocation.trim());
+    }
+    setIsEditingLocation(false);
+  };
+
+  const handleCancelLocation = () => {
+    setDraftLocation(
+      event.location.startsWith("未指定地點") ? "" : event.location
+    );
+    setIsEditingLocation(false);
+  };
+
   return (
     <div
       className={`bg-slate-900 rounded-xl border transition-all duration-300 flex flex-col justify-between overflow-hidden shadow-md hover:shadow-xl ${
@@ -164,7 +193,19 @@ export default function EventCard({
           : "border-slate-800"
       }`}
     >
-      <div className="p-4 cursor-pointer" onClick={onToggleExpand}>
+      <div
+        className="p-4 cursor-pointer touch-manipulation select-none"
+        onClick={onToggleExpand}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggleExpand();
+          }
+        }}
+        style={{ WebkitTapHighlightColor: "transparent" }}
+      >
         {/* 卡片頭部 */}
         <div className="flex justify-between items-start gap-2 mb-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -249,12 +290,13 @@ export default function EventCard({
                     ({formatGmtLabel(venueOffset)})
                   </span>
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       setDraftDate(showDateToInputValue(event.showDate));
                       setIsEditingDate(true);
                     }}
-                    className="text-slate-500 hover:text-purple-300 ml-0.5"
+                    className="text-slate-500 hover:text-purple-300 ml-0.5 p-1.5 -m-1 touch-manipulation"
                     title={lang === "zh" ? "手動調整時間" : "Edit time"}
                   >
                     <Pencil size={10} />
@@ -327,13 +369,14 @@ export default function EventCard({
                   </span>
                 )}
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setDraftCost(String(nativeCost));
                     setDraftCurrency(currency);
                     setIsEditingCost(true);
                   }}
-                  className="text-slate-500 hover:text-amber-300"
+                  className="text-slate-500 hover:text-amber-300 p-1.5 -m-1 touch-manipulation"
                   title={lang === "zh" ? "手動調整費用" : "Edit cost"}
                 >
                   <Pencil size={10} />
@@ -358,21 +401,69 @@ export default function EventCard({
 
         {/* 一鍵導航 */}
         <div className="flex items-center justify-between mt-3 text-xs">
-          <div className="flex items-center gap-1 text-slate-400 max-w-[70%]">
-            <MapPin size={12} className="text-rose-400 flex-shrink-0" />
-            <span className="truncate">{event.location}</span>
-          </div>
-          {!event.location.startsWith("未指定地點") && (
-            <a
-              href={getNavigationUrl(event.location)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[10px] bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800/80 px-2 py-1 rounded transition-all font-medium"
+          {isEditingLocation ? (
+            <span
+              className="flex items-center gap-1 flex-1 min-w-0"
               onClick={(e) => e.stopPropagation()}
             >
-              <Navigation size={10} />{" "}
-              {lang === "zh" ? "導航" : "Navigate"}
-            </a>
+              <MapPin size={12} className="text-rose-400 flex-shrink-0" />
+              <input
+                type="text"
+                value={draftLocation}
+                onChange={(e) => setDraftLocation(e.target.value)}
+                className="flex-1 min-w-0 bg-slate-950 border border-rose-500 rounded px-1.5 py-0.5 text-[11px] text-slate-200 focus:outline-none"
+                autoFocus
+              />
+              <button
+                onClick={handleSaveLocation}
+                className="text-emerald-400 hover:text-emerald-300 p-1.5 -m-1 touch-manipulation"
+                title={lang === "zh" ? "儲存" : "Save"}
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={handleCancelLocation}
+                className="text-slate-500 hover:text-slate-300 p-1.5 -m-1 touch-manipulation"
+                title={lang === "zh" ? "取消" : "Cancel"}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center gap-1 text-slate-400 max-w-[70%]">
+                <MapPin size={12} className="text-rose-400 flex-shrink-0" />
+                <span className="truncate">{event.location}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDraftLocation(
+                      event.location.startsWith("未指定地點")
+                        ? ""
+                        : event.location
+                    );
+                    setIsEditingLocation(true);
+                  }}
+                  className="text-slate-500 hover:text-rose-300 p-1.5 -m-1 touch-manipulation flex-shrink-0"
+                  title={lang === "zh" ? "手動修正地點" : "Edit location"}
+                >
+                  <Pencil size={10} />
+                </button>
+              </div>
+              {!event.location.startsWith("未指定地點") && (
+                <a
+                  href={getNavigationUrl(event.location)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[10px] bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800/80 px-2 py-1 rounded transition-all font-medium"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Navigation size={10} />{" "}
+                  {lang === "zh" ? "導航" : "Navigate"}
+                </a>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -493,6 +584,82 @@ export default function EventCard({
             </div>
           </div>
 
+          {/* 檔期場次：適合舞台劇、多場次演出這類「同個作品有很多場可選」的狀況 */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 space-y-2">
+            <span className="font-semibold text-[11px] text-slate-200 flex items-center gap-1">
+              <CalendarDays size={12} className="text-teal-400" />
+              {lang === "zh" ? "檔期場次" : "Run Schedule"}
+            </span>
+            <p className="text-[10px] text-slate-500">
+              {lang === "zh"
+                ? "同一齣作品有多場次可選時，把場次都記在這裡，點「設為主要場次」隨時切換釘選哪一場。"
+                : "For productions with multiple showtimes — keep them all here and pin whichever one you're attending."}
+            </p>
+
+            {event.alternateDates && event.alternateDates.length > 0 && (
+              <div className="space-y-1">
+                {event.alternateDates.map((altDate) => (
+                  <div
+                    key={altDate}
+                    className="flex items-center justify-between bg-slate-950/60 border border-slate-800/60 rounded px-2 py-1.5 text-[10px]"
+                  >
+                    <span className="text-slate-300 font-mono">{altDate}</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectAlternateDate(event.id, altDate);
+                        }}
+                        className="text-teal-400 hover:text-teal-300 font-medium px-1.5 py-0.5 touch-manipulation"
+                      >
+                        {lang === "zh" ? "設為主要場次" : "Select"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveAlternateDate(event.id, altDate);
+                        }}
+                        className="text-slate-600 hover:text-rose-400 p-1 touch-manipulation"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div
+              className="flex items-center gap-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="datetime-local"
+                value={draftAlternateDate}
+                onChange={(e) => setDraftAlternateDate(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-[10px] text-slate-200 font-mono focus:outline-none focus:border-teal-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (draftAlternateDate) {
+                    onAddAlternateDate(
+                      event.id,
+                      inputValueToShowDate(draftAlternateDate)
+                    );
+                    setDraftAlternateDate("");
+                  }
+                }}
+                className="flex items-center gap-1 text-[10px] font-medium text-teal-400 bg-teal-950/40 border border-teal-800 hover:bg-teal-900/50 px-2 py-1 rounded touch-manipulation"
+              >
+                <Plus size={11} />
+                {lang === "zh" ? "新增場次" : "Add"}
+              </button>
+            </div>
+          </div>
+
           {/* 同日行程 3 小時防撞調配 */}
           {hasConflict && (
             <div className="bg-slate-900 border border-slate-800/80 rounded-lg p-3">
@@ -530,11 +697,12 @@ export default function EventCard({
                       conflicts.map((c) => c.id)
                     );
                   }}
-                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded text-[10px] font-semibold border transition-all active:scale-95 ${
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded text-[10px] font-semibold border transition-all active:scale-95 touch-manipulation ${
                     currentRole === "primary"
                       ? "bg-amber-500 border-amber-400 text-slate-950"
                       : "bg-amber-950/40 border-amber-500 text-amber-400 hover:bg-amber-900/40"
                   }`}
+                  style={{ WebkitTapHighlightColor: "transparent" }}
                 >
                   <Star
                     size={10}
@@ -552,11 +720,12 @@ export default function EventCard({
                     e.stopPropagation();
                     onSetBackup(event.id);
                   }}
-                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded text-[10px] font-semibold border transition-all active:scale-95 ${
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded text-[10px] font-semibold border transition-all active:scale-95 touch-manipulation ${
                     currentRole === "backup"
                       ? "bg-slate-500 border-slate-300 text-slate-950"
                       : "bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800"
                   }`}
+                  style={{ WebkitTapHighlightColor: "transparent" }}
                 >
                   <Shield size={10} />{" "}
                   {lang === "zh" ? "設為備案" : "Set Backup"}
@@ -578,37 +747,6 @@ export default function EventCard({
               </p>
             </div>
           )}
-
-          {/* Google 日曆匯入 */}
-          <div className="bg-slate-900 border border-slate-800/80 rounded-lg p-3">
-            <div className="flex justify-between items-start gap-2">
-              <div>
-                <p className="font-semibold text-[11px] text-slate-200">
-                  ⏱️ {lang === "zh" ? "日期追蹤管制" : "Timeline Tracking"}
-                </p>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  {lang === "zh"
-                    ? "匯入日曆時，系統會自動標註時區換算與連結資訊。"
-                    : "Exports events with automatic timezone translations."}
-                </p>
-              </div>
-              <a
-                href={getGoogleCalendarLink(
-                  event.title,
-                  event.showDate,
-                  `[時區資訊] 舉辦地時區: ${formatGmtLabel(
-                    venueOffset
-                  )}\n\n原始網址情報源: ${event.sourceUrl}`
-                )}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-indigo-900/60 hover:bg-indigo-800 border border-indigo-700/80 hover:border-indigo-600 px-2 py-1.5 rounded text-[10px] font-medium text-indigo-200 transition-colors whitespace-nowrap flex-shrink-0"
-              >
-                ➕{" "}
-                {lang === "zh" ? "匯入 Google 日曆" : "Add to Google Calendar"}
-              </a>
-            </div>
-          </div>
 
           {/* 變更狀態 */}
           <div className="flex items-center justify-between bg-slate-900/50 p-2.5 rounded-lg border border-slate-800">
