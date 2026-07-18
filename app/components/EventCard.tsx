@@ -238,7 +238,11 @@ export default function EventCard({
         <p className="text-xs text-indigo-400 font-medium mb-3">
           {event.artist}
         </p>
+      </div>
 
+      {/* 這一段以下（時間／費用／地點）刻意不放進上面那個可點擊展開的區域，
+          避免鉛筆編輯按鈕跟「點擊展開卡片」的事件互相打架（手機瀏覽器上尤其容易出狀況） */}
+      <div className="px-4 pb-4 -mt-1">
         <div className="bg-slate-950/60 rounded-lg p-2 border border-slate-800/50 space-y-1.5 text-xs">
           {/* 雙軌並排展示 */}
           <div className="space-y-1">
