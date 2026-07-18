@@ -6,6 +6,7 @@ import { mockEvents as initialMockEvents, ShowEvent } from "./mockEvents";
 import { supabase } from "./lib/supabaseClient";
 import { fetchEvents, syncEvents } from "./lib/eventsApi";
 import { fetchUserSettings, syncUserSettings } from "./lib/settingsApi";
+import { generateIcsContent, downloadIcsFile } from "./lib/icsExport";
 import { sendLoginLink, signOut } from "./lib/authApi";
 import { TRANSLATIONS, LangType } from "./lib/translations";
 import { ChecklistItem, AlarmConfig } from "./types";
@@ -643,6 +644,58 @@ export default function Dashboard() {
     saveEventsToStorage(updated);
   };
 
+  // 手動修正地點（例如網址自動辨識失敗，或官方公告地點有異動）
+  const handleLocationChange = (id: string, newLocation: string) => {
+    const updated = events.map((event) =>
+      event.id === id ? { ...event, location: newLocation } : event
+    );
+    saveEventsToStorage(updated);
+  };
+
+  // 檔期場次：新增一筆候補場次到清單（不影響目前釘選的主要場次）
+  const handleAddAlternateDate = (id: string, newDate: string) => {
+    const updated = events.map((event) =>
+      event.id === id
+        ? {
+            ...event,
+            alternateDates: [...(event.alternateDates || []), newDate],
+          }
+        : event
+    );
+    saveEventsToStorage(updated, false);
+  };
+
+  // 檔期場次：從候補清單移除一筆場次
+  const handleRemoveAlternateDate = (id: string, dateToRemove: string) => {
+    const updated = events.map((event) =>
+      event.id === id
+        ? {
+            ...event,
+            alternateDates: (event.alternateDates || []).filter(
+              (d) => d !== dateToRemove
+            ),
+          }
+        : event
+    );
+    saveEventsToStorage(updated, false);
+  };
+
+  // 檔期場次：把候補清單裡的某一場，切換成目前釘選的主要場次（原本的主要場次會被放回候補清單）
+  const handleSelectAlternateDate = (id: string, selectedDate: string) => {
+    const updated = events.map((event) => {
+      if (event.id !== id) return event;
+      const otherAlternates = (event.alternateDates || []).filter(
+        (d) => d !== selectedDate
+      );
+      return {
+        ...event,
+        showDate: selectedDate,
+        alternateDates: [...otherAlternates, event.showDate],
+      };
+    });
+    saveEventsToStorage(updated, false);
+  };
+
   // 手動調整卡片上的預估費用（直接以單一項目覆蓋原本的 expenses 明細）
   const handleCostChange = (id: string, newTotalCost: number) => {
     const updated = events.map((event) =>
@@ -1104,6 +1157,32 @@ export default function Dashboard() {
               : "Export This Category"}
           </button>
 
+          <button
+            onClick={() => {
+              const activeEvents = events.filter((e) => !e.deletedAt);
+              const icsContent = generateIcsContent(
+                activeEvents,
+                eventOffsets,
+                browserOffset
+              );
+              downloadIcsFile(
+                icsContent,
+                `NonstopChallenger_${
+                  new Date().toISOString().split("T")[0]
+                }.ics`
+              );
+            }}
+            className="flex items-center gap-1 text-[11px] text-indigo-300 hover:text-white hover:bg-indigo-900/30 border border-indigo-900/50 px-2 py-1.5 rounded-lg transition-all"
+            title={
+              lang === "zh"
+                ? "匯出所有活動為行事曆檔案（.ics），Google/Apple/Outlook 日曆都能匯入"
+                : "Export all events as .ics — works with Google/Apple/Outlook Calendar"
+            }
+          >
+            <Calendar size={12} />{" "}
+            {lang === "zh" ? "匯出行事曆 (.ics)" : "Export Calendar"}
+          </button>
+
           <div className="bg-slate-900 p-1 rounded-xl border border-slate-800 flex">
             <button
               onClick={() => setViewMode("show")}
@@ -1400,6 +1479,10 @@ export default function Dashboard() {
                     onStatusChange={handleStatusChange}
                     onNotesChange={handleNotesChange}
                     onDateChange={handleDateChange}
+                    onLocationChange={handleLocationChange}
+                    onAddAlternateDate={handleAddAlternateDate}
+                    onRemoveAlternateDate={handleRemoveAlternateDate}
+                    onSelectAlternateDate={handleSelectAlternateDate}
                     onCostChange={handleCostChange}
                     onDelete={handleDeleteEvent}
                   />
@@ -1423,11 +1506,13 @@ export default function Dashboard() {
                 onChange={(e) => setNewCheckItem(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addChecklistItem()}
                 placeholder={t.checklistPlaceholder}
-                className="flex-grow bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-purple-500 transition-colors"
+                className="flex-grow bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-purple-500 transition-colors touch-manipulation"
               />
               <button
+                type="button"
                 onClick={addChecklistItem}
-                className="bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all active:scale-95 flex items-center gap-0.5"
+                className="bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all active:scale-95 flex items-center gap-0.5 touch-manipulation"
+                style={{ WebkitTapHighlightColor: "transparent" }}
               >
                 <Plus size={14} /> {t.addBtn}
               </button>

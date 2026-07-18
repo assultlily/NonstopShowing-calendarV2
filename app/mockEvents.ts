@@ -30,6 +30,9 @@ export interface ShowEvent {
     | "seminar";
   location: string;
   showDate: string;
+  // 這個活動如果是有多場次的檔期（例如舞台劇連演兩週），這裡存其他已知場次
+  // showDate 是目前「釘選」為主要場次的那一個，其餘場次存在這裡當參考，可以隨時切換
+  alternateDates?: string[];
   agency: string;
   sourceUrl: string;
   statusLifecycle:
