@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
+import EvidenceVault from "./EvidenceVault";
 import { LangType, TRANSLATIONS } from "../lib/translations";
 import {
   getNavigationUrl,
@@ -250,15 +251,15 @@ export default function EventCard({
               <span className="flex items-center gap-1">
                 🏟️ {lang === "zh" ? "舉辦地時間" : "Venue Time"}
                 {!isOffsetConfirmed && (
-                  <AlertTriangle
-                    size={11}
-                    className="text-amber-400"
+                  <span
                     title={
                       lang === "zh"
                         ? "尚未確認場館時區，目前顯示的是您自己所在的時區，請手動確認"
                         : "Venue timezone not confirmed — showing your own timezone as a fallback"
                     }
-                  />
+                  >
+                    <AlertTriangle size={11} className="text-amber-400" aria-hidden="true" />
+                  </span>
                 )}
               </span>
               {isEditingDate ? (
@@ -866,6 +867,9 @@ export default function EventCard({
               </span>
             </div>
           </div>
+
+          {/* 消費爭議存證 */}
+          <EvidenceVault eventId={event.id} eventTitle={event.title} lang={lang} />
 
           <div>
             <h4 className="text-slate-400 font-medium flex items-center gap-1 mb-1">
