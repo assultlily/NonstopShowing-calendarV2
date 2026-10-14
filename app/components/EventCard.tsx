@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { ShowEvent } from "../mockEvents";
 import { AlarmConfig } from "../types";
+import EvidenceVault from "./EvidenceVault";
 import { LangType, TRANSLATIONS } from "../lib/translations";
 import {
   getNavigationUrl,
@@ -866,6 +867,9 @@ export default function EventCard({
               </span>
             </div>
           </div>
+
+          {/* 消費爭議存證 */}
+          <EvidenceVault eventId={event.id} eventTitle={event.title} lang={lang} />
 
           <div>
             <h4 className="text-slate-400 font-medium flex items-center gap-1 mb-1">
