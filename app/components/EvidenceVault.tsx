@@ -1,19 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, Download, Loader2, Paperclip, Shield, Trash2, Upload } from "lucide-react";
+import { Archive, Cloud, CloudDownload, Download, Loader2, Paperclip, Shield, Trash2, Upload } from "lucide-react";
 import {
+  CLOUD_KEEP_DAYS,
+  CloudCopy,
   EVIDENCE_ACCEPT,
   EVIDENCE_DISCLAIMER,
   EVIDENCE_KINDS,
   EVIDENCE_MAX_FILES,
   EvidenceFile,
   EvidenceKind,
+  addEvidence,
+  backupToCloud,
   checkEvidenceFile,
-  deleteEvidence,
-  getEvidenceUrl,
-  listEvidence,
+  currentUserId,
+  getCloudConsent,
+  listCloud,
+  listLocal,
+  openEvidence,
   packEvidence,
+  removeEvidence,
+  restoreFromCloud,
+  setCloudConsent,
   updateEvidence,
-  uploadEvidence,
+  withdrawCloudConsent,
 } from "../lib/evidenceApi";
 import { LangType } from "../lib/translations";
 
@@ -23,40 +32,79 @@ interface Props {
   lang: LangType;
 }
 
-// ISO → <input type="datetime-local"> 用的本地時間字串
 function toLocalInput(iso: string): string {
   const d = new Date(iso);
-  const off = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - off).toISOString().slice(0, 16);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 function fmtSize(bytes: number): string {
-  return bytes >= 1024 * 1024
-    ? (bytes / 1024 / 1024).toFixed(1) + " MB"
-    : Math.ceil(bytes / 1024) + " KB";
+  return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + " MB" : Math.ceil(bytes / 1024) + " KB";
 }
 
-// 消費爭議存證：預設收合，展開才讀取，避免每張卡都去抓資料
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+const byTime = (a: EvidenceFile, b: EvidenceFile) => a.capturedAt.localeCompare(b.capturedAt);
+
+// 消費爭議存證：預設只存在這台裝置；使用者同意後才暫存到雲端
 export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
   const zh = lang === "zh";
   const [open, setOpen] = useState(false);
+  const [uid, setUid] = useState<string | null>(null);
   const [files, setFiles] = useState<EvidenceFile[] | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [cloudOnly, setCloudOnly] = useState<CloudCopy[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const sortList = (list: EvidenceFile[]) =>
-    [...list].sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
-
+  // 展開才讀取
   useEffect(() => {
     if (!open || files !== null) return;
-    listEvidence(eventId)
-      .then(setFiles)
-      .catch((e) => setMsg(String(e.message || e)));
+    (async () => {
+      try {
+        const id = await currentUserId();
+        setUid(id);
+        const local = await listLocal(id, eventId);
+        setFiles(local);
+        const agreed = getCloudConsent(id);
+        setConsent(agreed);
+        if (agreed) await syncCloud(local);
+      } catch (e) {
+        setFiles([]);
+        setMsg((e as Error).message);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, files, eventId]);
 
+  // 已同意：把還沒備份的補上去，並列出雲端有、這台裝置沒有的
+  async function syncCloud(local: EvidenceFile[]) {
+    setBusy("同步雲端暫存…");
+    try {
+      const cloud = await listCloud(eventId);
+      const cloudIds = new Set(cloud.map((c) => c.id));
+      const localIds = new Set(local.map((f) => f.id));
+      let next = local.map((f) => {
+        const c = cloud.find((x) => x.id === f.id);
+        return { ...f, cloudExpiresAt: c ? c.expiresAt : null };
+      });
+      for (const f of next.filter((x) => !cloudIds.has(x.id))) {
+        const saved = await backupToCloud(f);
+        next = next.map((x) => (x.id === saved.id ? saved : x));
+      }
+      setFiles(next.sort(byTime));
+      setCloudOnly(cloud.filter((c) => !localIds.has(c.id)));
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+    setBusy(null);
+  }
+
   async function onPick(list: FileList | null) {
-    if (!list || !files) return;
+    if (!list || !files || !uid) return;
     const picked = Array.from(list);
     const room = EVIDENCE_MAX_FILES - files.length;
     const problems: string[] = [];
@@ -71,10 +119,17 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
     }
     let next = files;
     for (let i = 0; i < ok.length; i++) {
-      setBusy(`上傳中 ${i + 1}/${ok.length}…`);
+      setBusy(`加入中 ${i + 1}/${ok.length}…`);
       try {
-        const saved = await uploadEvidence(eventId, ok[i]);
-        next = sortList([...next, saved]);
+        let rec = await addEvidence(uid, eventId, ok[i]);
+        if (consent) {
+          try {
+            rec = await backupToCloud(rec);
+          } catch (e) {
+            problems.push(`${ok[i].name}：已存在本機，雲端暫存失敗（${(e as Error).message}）`);
+          }
+        }
+        next = [...next, rec].sort(byTime);
         setFiles(next);
       } catch (e) {
         problems.push(`${ok[i].name}：${(e as Error).message}`);
@@ -85,32 +140,68 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
     if (inputRef.current) inputRef.current.value = "";
   }
 
-  async function patch(f: EvidenceFile, change: Partial<EvidenceFile>) {
-    const updated = { ...f, ...change };
-    setFiles((prev) => (prev ? sortList(prev.map((x) => (x.id === f.id ? updated : x))) : prev));
+  async function patch(f: EvidenceFile, change: Partial<Pick<EvidenceFile, "kind" | "capturedAt" | "note">>) {
     try {
-      await updateEvidence(f.id, change);
+      const saved = await updateEvidence(f, change);
+      setFiles((prev) => (prev ? prev.map((x) => (x.id === f.id ? saved : x)).sort(byTime) : prev));
     } catch (e) {
       setMsg((e as Error).message);
     }
   }
 
   async function remove(f: EvidenceFile) {
-    if (!window.confirm(`刪除「${f.fileName}」？刪除後無法復原。`)) return;
+    const where = f.cloudExpiresAt ? "（本機與雲端暫存都會刪除）" : "";
+    if (!window.confirm(`刪除「${f.fileName}」？刪除後無法復原。${where}`)) return;
     try {
-      await deleteEvidence(f);
+      await removeEvidence(f);
       setFiles((prev) => (prev ? prev.filter((x) => x.id !== f.id) : prev));
     } catch (e) {
       setMsg((e as Error).message);
     }
   }
 
-  async function view(f: EvidenceFile) {
-    try {
-      window.open(await getEvidenceUrl(f), "_blank", "noopener,noreferrer");
-    } catch (e) {
-      setMsg((e as Error).message);
+  async function toggleConsent(on: boolean) {
+    if (!uid || !files) return;
+    if (on) {
+      const ok = window.confirm(
+        `同意將存證檔案的副本暫存到雲端？\n\n` +
+          `・用途：換裝置時可以取回，或避免清除瀏覽器資料後遺失。\n` +
+          `・保存 ${CLOUD_KEEP_DAYS} 天，到期自動刪除；隨時可取消勾選，雲端副本會立即刪除。\n` +
+          `・只有你登入的帳號看得到。\n\n不同意也能正常使用，檔案只會留在這台裝置。`
+      );
+      if (!ok) return;
+      setCloudConsent(uid, true);
+      setConsent(true);
+      await syncCloud(files);
+    } else {
+      if (!window.confirm("取消同意後，會立即刪除你在雲端的所有存證暫存副本（這台裝置上的檔案不受影響）。確定？")) return;
+      setBusy("刪除雲端暫存…");
+      try {
+        const n = await withdrawCloudConsent(uid);
+        setConsent(false);
+        setCloudOnly([]);
+        setFiles((prev) => (prev ? prev.map((x) => ({ ...x, cloudExpiresAt: null })) : prev));
+        setMsg(`已刪除雲端暫存 ${n} 件。`);
+      } catch (e) {
+        setMsg((e as Error).message);
+      }
+      setBusy(null);
     }
+  }
+
+  async function restoreAll() {
+    const restored: EvidenceFile[] = [];
+    for (let i = 0; i < cloudOnly.length; i++) {
+      setBusy(`取回中 ${i + 1}/${cloudOnly.length}…`);
+      try {
+        restored.push(await restoreFromCloud(cloudOnly[i]));
+      } catch (e) {
+        setMsg((e as Error).message);
+      }
+    }
+    setFiles((prev) => [...(prev || []), ...restored].sort(byTime));
+    setCloudOnly((prev) => prev.filter((c) => !restored.some((r) => r.id === c.id)));
+    setBusy(null);
   }
 
   async function pack() {
@@ -142,7 +233,7 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
           {zh ? "🧾 消費爭議存證" : "🧾 Dispute Evidence"}
           {files && <span className="text-slate-600 text-[10px] ml-1">{files.length}/{EVIDENCE_MAX_FILES}</span>}
         </span>
-        <span className="text-[10px] text-slate-600">{open ? (zh ? "收合" : "Hide") : (zh ? "展開" : "Show")}</span>
+        <span className="text-[10px] text-slate-600">{open ? (zh ? "收合" : "Hide") : zh ? "展開" : "Show"}</span>
       </button>
 
       {open && (
@@ -152,22 +243,42 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
           </p>
           <p className="text-[10px] text-slate-500">
             {zh
-              ? `收截圖、照片、票根、PDF、文字頁面；單檔 5MB 以內，每張卡最多 ${EVIDENCE_MAX_FILES} 件。依檔案時間自動排序。`
-              : `Screenshots, photos, tickets, PDFs, text pages; ≤5MB each, up to ${EVIDENCE_MAX_FILES} per card.`}
+              ? `檔案只存在這台裝置的瀏覽器裡。收截圖、照片、票根、PDF、文字頁面；單檔 5MB 以內，每張卡最多 ${EVIDENCE_MAX_FILES} 件。依檔案時間自動排序。清除瀏覽器資料前，請先打包下載。`
+              : `Files stay in this browser only. ≤5MB each, up to ${EVIDENCE_MAX_FILES} per card. Download a ZIP before clearing browser data.`}
           </p>
 
-          <div className="flex gap-2">
+          <label className="flex items-start gap-1.5 text-[10px] text-slate-400 cursor-pointer">
             <input
-              ref={inputRef}
-              type="file"
-              multiple
-              accept={EVIDENCE_ACCEPT}
-              className="hidden"
-              onChange={(e) => onPick(e.target.files)}
+              type="checkbox"
+              checked={consent}
+              disabled={!!busy || !uid}
+              onChange={(e) => toggleConsent(e.target.checked)}
+              className="mt-0.5 accent-amber-500"
             />
+            <span>
+              {zh
+                ? `同意把副本暫存到雲端（${CLOUD_KEEP_DAYS} 天後自動刪除，可隨時取消並立即刪除）`
+                : `Keep a cloud copy (auto-deleted after ${CLOUD_KEEP_DAYS} days; revoke anytime)`}
+            </span>
+          </label>
+
+          {cloudOnly.length > 0 && (
             <button
               type="button"
-              disabled={!!busy || files === null || files.length >= EVIDENCE_MAX_FILES}
+              disabled={!!busy}
+              onClick={restoreAll}
+              className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] border border-sky-800/60 bg-sky-950/30 text-sky-300 hover:bg-sky-950/60 disabled:opacity-40"
+            >
+              <CloudDownload size={12} />
+              {zh ? `雲端暫存有 ${cloudOnly.length} 件不在這台裝置，取回` : `Restore ${cloudOnly.length} from cloud`}
+            </button>
+          )}
+
+          <div className="flex gap-2">
+            <input ref={inputRef} type="file" multiple accept={EVIDENCE_ACCEPT} className="hidden" onChange={(e) => onPick(e.target.files)} />
+            <button
+              type="button"
+              disabled={!!busy || files === null || !uid || files.length >= EVIDENCE_MAX_FILES}
               onClick={() => inputRef.current?.click()}
               className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
             >
@@ -193,7 +304,7 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
           {files === null ? (
             <p className="text-[10px] text-slate-600">{zh ? "讀取中…" : "Loading…"}</p>
           ) : files.length === 0 ? (
-            <p className="text-[10px] text-slate-600">{zh ? "還沒有存證檔案。" : "No evidence yet."}</p>
+            <p className="text-[10px] text-slate-600">{zh ? "這台裝置上還沒有存證檔案。" : "No evidence on this device yet."}</p>
           ) : (
             <ol className="space-y-1.5">
               {files.map((f, i) => (
@@ -202,28 +313,27 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
                     <span className="text-slate-600 font-mono w-5">{String(i + 1).padStart(2, "0")}</span>
                     <button
                       type="button"
-                      onClick={() => view(f)}
+                      onClick={() => openEvidence(f)}
                       className="flex-1 min-w-0 truncate text-left text-slate-300 hover:text-purple-300 flex items-center gap-1"
                       title={f.fileName}
                     >
                       <Paperclip size={10} className="flex-shrink-0" />
                       <span className="truncate">{f.fileName}</span>
                     </button>
+                    {f.cloudExpiresAt && (
+                      <span
+                        className="text-sky-500 flex items-center gap-0.5 text-[9px] flex-shrink-0"
+                        title={zh ? `雲端暫存至 ${fmtDate(f.cloudExpiresAt)}` : `Cloud copy until ${fmtDate(f.cloudExpiresAt)}`}
+                      >
+                        <Cloud size={10} />
+                        {fmtDate(f.cloudExpiresAt)}
+                      </span>
+                    )}
                     <span className="text-slate-600 text-[10px] flex-shrink-0">{fmtSize(f.sizeBytes)}</span>
-                    <button
-                      type="button"
-                      onClick={() => view(f)}
-                      className="text-slate-500 hover:text-slate-200"
-                      aria-label={zh ? "開啟" : "Open"}
-                    >
+                    <button type="button" onClick={() => openEvidence(f)} className="text-slate-500 hover:text-slate-200" aria-label={zh ? "開啟" : "Open"}>
                       <Download size={11} />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => remove(f)}
-                      className="text-slate-600 hover:text-rose-400"
-                      aria-label={zh ? "刪除" : "Delete"}
-                    >
+                    <button type="button" onClick={() => remove(f)} className="text-slate-600 hover:text-rose-400" aria-label={zh ? "刪除" : "Delete"}>
                       <Trash2 size={11} />
                     </button>
                   </div>
@@ -244,7 +354,9 @@ export default function EvidenceVault({ eventId, eventTitle, lang }: Props) {
                       aria-label={zh ? "類型" : "Kind"}
                     >
                       {EVIDENCE_KINDS.map((k) => (
-                        <option key={k} value={k}>{k}</option>
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
                       ))}
                     </select>
                   </div>
