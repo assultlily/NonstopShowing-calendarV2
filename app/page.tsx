@@ -8,6 +8,7 @@ import { fetchEvents, syncEvents } from "./lib/eventsApi";
 import { fetchUserSettings, syncUserSettings } from "./lib/settingsApi";
 import { generateIcsContent, downloadIcsFile } from "./lib/icsExport";
 import { sendLoginLink, signOut } from "./lib/authApi";
+import { currentUserId, countLocalEvidence, purgeEvidenceForEvent } from "./lib/evidenceApi";
 import { TRANSLATIONS, LangType } from "./lib/translations";
 import { ChecklistItem, AlarmConfig } from "./types";
 import {
@@ -758,13 +759,32 @@ export default function Dashboard() {
   };
 
   // 從垃圾桶永久刪除（這個動作沒辦法復原）
-  const handlePermanentlyDeleteEvent = (id: string) => {
+  const handlePermanentlyDeleteEvent = async (id: string) => {
     const target = events.find((e) => e.id === id);
+    let uid = "";
+    let evidenceCount = 0;
+    try {
+      uid = await currentUserId();
+      evidenceCount = await countLocalEvidence(uid, id);
+    } catch {
+      // 讀不到存證時照常刪卡片，只是不能順便清存證
+    }
+    const evidenceWarning =
+      evidenceCount > 0
+        ? `\n\n這張卡片有 ${evidenceCount} 件消費爭議存證，會一起刪除（含雲端暫存）。需要保留的話，請先取消並用「一鍵打包」下載。`
+        : "";
     const confirmed = confirm(
-      `確定要永久刪除「${target?.title || "這張卡片"}」嗎？此動作無法復原！`
+      `確定要永久刪除「${target?.title || "這張卡片"}」嗎？此動作無法復原！${evidenceWarning}`
     );
     if (!confirmed) return;
 
+    if (uid) {
+      try {
+        await purgeEvidenceForEvent(uid, id);
+      } catch (err) {
+        console.error("清除存證失敗", err);
+      }
+    }
     const updated = events.filter((event) => event.id !== id);
     saveEventsToStorage(updated, false);
     setAiNotice(`🗑️ 已永久刪除「${target?.title || "該活動"}」。`);

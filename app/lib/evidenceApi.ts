@@ -195,6 +195,25 @@ export async function removeEvidence(rec: EvidenceFile): Promise<void> {
   await deleteLocal(rec.id);
 }
 
+// 卡片永久刪除時：清掉這張卡在本機與雲端的所有存證，避免留下孤兒檔案
+export async function purgeEvidenceForEvent(uid: string, eventId: string): Promise<number> {
+  const local = await listLocal(uid, eventId);
+  const { data, error } = await supabase
+    .from("evidence_files")
+    .select("id, storage_path")
+    .eq("event_id", eventId);
+  if (error) throw error;
+  const cloud = (data || []) as { id: string; storage_path: string }[];
+  for (const r of cloud) await deleteCloudCopy(r.id, r.storage_path);
+  for (const rec of local) await deleteLocal(rec.id);
+  return local.length;
+}
+
+// 計算某張卡在本機有幾件存證（刪除前提醒用）
+export async function countLocalEvidence(uid: string, eventId: string): Promise<number> {
+  return (await listLocal(uid, eventId)).length;
+}
+
 export function openEvidence(rec: EvidenceFile): void {
   const url = URL.createObjectURL(rec.blob);
   window.open(url, "_blank", "noopener,noreferrer");
